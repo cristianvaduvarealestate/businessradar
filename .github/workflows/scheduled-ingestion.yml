@@ -1,0 +1,48 @@
+name: Autonomous Company Ingestion & Watchdog
+
+on:
+  schedule:
+    # Run every 4 hours for ONRC discovery & incremental ingestion
+    - cron: '0 */4 * * *'
+    # Run daily at 06:00 UTC (08:00 EET) for Watchdog & Heartbeat
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  ingest-and-monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Initialize Database
+        run: python3 scripts/init_database.py
+
+      - name: Run ONRC Discovery & Ingestion
+        run: python3 scripts/ingest_onrc.py 5000
+        env:
+          DATABASE_PATH: ./data/radar_business.db
+
+      - name: Run System Watchdog & Telegram Heartbeat
+        run: python3 scripts/run_watchdog.py
+        env:
+          DATABASE_PATH: ./data/radar_business.db
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      - name: Run Automated Test Suite
+        run: npm test
