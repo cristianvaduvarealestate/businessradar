@@ -8,6 +8,8 @@ coverage/
 
 # Next.js
 .next/
+.open-next/
+.wrangler/
 out/
 build/
 dist/
