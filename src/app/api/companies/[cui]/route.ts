@@ -10,7 +10,7 @@ export async function GET(
   { params }: { params: { cui: string } }
 ) {
   // Defense-in-depth auth check
-  const auth = validateRequest(request);
+  const auth = await validateRequest(request);
   if (!auth.authenticated) {
     return NextResponse.json(
       { success: false, error: 'Unauthorized', message: 'Autentificare necesară.' },

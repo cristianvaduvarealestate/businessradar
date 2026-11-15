@@ -7,7 +7,7 @@ import { getClientIp } from '@/lib/rate-limit';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  const auth = validateRequest(request);
+  const auth = await validateRequest(request);
   if (!auth.authenticated) {
     return NextResponse.json(
       { success: false, error: 'Unauthorized', message: 'Autentificare necesară.' },
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const ip = getClientIp(request.headers);
-  const auth = validateRequest(request);
+  const auth = await validateRequest(request);
 
   if (!auth.authenticated) {
     return NextResponse.json(

@@ -1,5 +1,4 @@
 import { NextRequest } from 'next/server';
-import crypto from 'crypto';
 
 export const AUTHORIZED_ADMIN_EMAILS = [
   'myremaxclubcristianv@gmail.com',
@@ -15,34 +14,40 @@ export function getInternalSecurityKey(): string {
 }
 
 /**
- * Constant-time string comparison using SHA-256 fixed-size digests and crypto.timingSafeEqual.
- * Prevents timing side-channel attacks and string length leakage.
+ * Constant-time string comparison to prevent timing side-channel attacks.
+ * Iterates through all characters with XOR comparison regardless of matching status.
  */
 export function constantTimeCompare(a: string, b: string): boolean {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   if (!a || !b) return false;
 
-  try {
-    const hashA = crypto.createHash('sha256').update(a, 'utf8').digest();
-    const hashB = crypto.createHash('sha256').update(b, 'utf8').digest();
-    return crypto.timingSafeEqual(hashA, hashB);
-  } catch {
-    // Constant-time XOR comparison fallback
-    const lenA = a.length;
-    const lenB = b.length;
-    let diff = lenA ^ lenB;
-    for (let i = 0; i < lenA; i++) {
-      diff |= a.charCodeAt(i) ^ (i < lenB ? b.charCodeAt(i) : 0);
-    }
-    return diff === 0;
+  const lenA = a.length;
+  const lenB = b.length;
+  let diff = lenA ^ lenB;
+  for (let i = 0; i < lenA; i++) {
+    diff |= a.charCodeAt(i) ^ (i < lenB ? b.charCodeAt(i) : 0);
   }
+  return diff === 0;
 }
 
 /**
- * Cryptographic HMAC-SHA256 signature generation.
+ * Cryptographic HMAC-SHA256 signature generation using universal Web Crypto API.
+ * Standard across Node.js, Vercel Edge Runtime, and Cloudflare Workers.
  */
-export function createHmacSha256(message: string, secret: string): string {
-  return crypto.createHmac('sha256', secret).update(message, 'utf8').digest('hex');
+export async function computeHmacSha256(message: string, key: string): Promise<string> {
+  const enc = new TextEncoder();
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(key),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const signature = await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(message));
+  const hex = Array.from(new Uint8Array(signature))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+  return hex;
 }
 
 export interface AuthResult {
@@ -63,7 +68,6 @@ interface ParsedJwt {
   header: Record<string, any>;
   payload: Record<string, any>;
   signature: string;
-  rawSignedData: string;
 }
 
 /**
@@ -84,7 +88,6 @@ function parseJwt(token: string): ParsedJwt | null {
       header,
       payload,
       signature: parts[2],
-      rawSignedData: `${parts[0]}.${parts[1]}`,
     };
   } catch {
     return null;
@@ -161,7 +164,7 @@ function validateCloudflareAccessJwt(
     return { valid: false, reason: 'unauthorized_identity' };
   }
 
-  // Fail closed if CF_ACCESS_AUD is not set in production
+  // If CF_ACCESS_AUD is configured in environment, allow verified user
   if (process.env.CF_ACCESS_AUD) {
     return { valid: true, email: tokenEmail };
   }
@@ -173,7 +176,7 @@ function validateCloudflareAccessJwt(
 /**
  * Validates request credentials against Cloudflare Access and internal auth mechanisms
  */
-export function validateRequest(request: NextRequest): AuthResult {
+export async function validateRequest(request: NextRequest): Promise<AuthResult> {
   // 1. Check Cloudflare Access edge identity headers
   const cfEmail = request.headers.get('cf-access-authenticated-user-email');
   const cfJwt = request.headers.get('cf-access-jwt-assertion');
@@ -205,10 +208,18 @@ export function validateRequest(request: NextRequest): AuthResult {
     }
   }
 
-  // 2. Check Admin Session Cookie
-  const sessionCookie = request.cookies.get('radar_auth_session')?.value;
+  // 2. Check Admin Session Cookie (checking both parsed cookies and raw headers)
+  let sessionCookie = request.cookies.get('radar_auth_session')?.value;
+  if (!sessionCookie) {
+    const cookieHeader = request.headers.get('cookie') || '';
+    const match = cookieHeader.match(/(?:^|;\s*)radar_auth_session=([^;]+)/);
+    if (match) {
+      sessionCookie = match[1];
+    }
+  }
+
   if (sessionCookie) {
-    const valid = verifySessionToken(sessionCookie);
+    const valid = await verifySessionToken(sessionCookie);
     if (valid.valid && valid.email) {
       const isAuthorized = AUTHORIZED_ADMIN_EMAILS.some(
         (admin) => admin.toLowerCase() === valid.email!.toLowerCase()
@@ -271,26 +282,27 @@ export function validateRequest(request: NextRequest): AuthResult {
 /**
  * Creates a signed session token: email:timestamp:hmac_sha256
  */
-export function createSessionToken(email: string): string {
+export async function createSessionToken(email: string): Promise<string> {
   const secret = getInternalSecurityKey();
   if (!secret || secret.length < 16) {
     throw new Error('Internal security key is not configured or too short.');
   }
   const timestamp = Date.now();
   const payload = `${email}:${timestamp}`;
-  const signature = createHmacSha256(payload, secret);
+  const signature = await computeHmacSha256(payload, secret);
   return `${payload}:${signature}`;
 }
 
 /**
  * Verifies a signed session token
  */
-export function verifySessionToken(token: string): { valid: boolean; email?: string } {
+export async function verifySessionToken(token: string): Promise<{ valid: boolean; email?: string }> {
   try {
+    const rawToken = typeof token === 'string' && token.includes('%') ? decodeURIComponent(token) : token;
     const secret = getInternalSecurityKey();
     if (!secret || secret.length < 16) return { valid: false };
 
-    const parts = token.split(':');
+    const parts = rawToken.split(':');
     if (parts.length !== 3) return { valid: false };
 
     const [email, timestampStr, signature] = parts;
@@ -302,7 +314,7 @@ export function verifySessionToken(token: string): { valid: boolean; email?: str
     }
 
     const payload = `${email}:${timestampStr}`;
-    const expectedSignature = createHmacSha256(payload, secret);
+    const expectedSignature = await computeHmacSha256(payload, secret);
 
     if (constantTimeCompare(signature, expectedSignature)) {
       return { valid: true, email };

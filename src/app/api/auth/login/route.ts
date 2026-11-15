@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate signed session token
-    const token = createSessionToken(email);
+    const token = await createSessionToken(email);
 
     logAuditEvent({
       user: email,

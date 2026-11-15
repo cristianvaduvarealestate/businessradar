@@ -13,7 +13,7 @@ const PUBLIC_PATHS = [
   '/gdpr',
 ];
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const ip = getClientIp(request.headers);
 
@@ -31,7 +31,7 @@ export function middleware(request: NextRequest) {
 
   // 3. Authenticate private routes
   if (!isPublicPath) {
-    const auth = validateRequest(request);
+    const auth = await validateRequest(request);
 
     if (!auth.authenticated) {
       // If API route: return JSON 401

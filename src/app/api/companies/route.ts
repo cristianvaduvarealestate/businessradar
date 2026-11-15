@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   // Defense-in-depth auth check
-  const auth = validateRequest(request);
+  const auth = await validateRequest(request);
   if (!auth.authenticated) {
     return NextResponse.json(
       { success: false, error: 'Unauthorized', message: 'Autentificare necesară.' },

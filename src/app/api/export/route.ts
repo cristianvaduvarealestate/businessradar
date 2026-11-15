@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const ip = getClientIp(request.headers);
 
   // 1. Authenticate request
-  const auth = validateRequest(request);
+  const auth = await validateRequest(request);
   if (!auth.authenticated) {
     logAuditEvent({
       user: 'anonymous',
