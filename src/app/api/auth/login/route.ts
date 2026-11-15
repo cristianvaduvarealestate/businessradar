@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   AUTHORIZED_ADMIN_EMAILS,
+  constantTimeCompare,
   createSessionToken,
   getInternalSecurityKey,
 } from '@/lib/auth';
@@ -49,7 +50,8 @@ export async function POST(request: NextRequest) {
     const isAuthorizedEmail = AUTHORIZED_ADMIN_EMAILS.some(
       (admin) => admin.toLowerCase() === email
     );
-    const isValidKey = key === getInternalSecurityKey();
+    const serverKey = getInternalSecurityKey();
+    const isValidKey = serverKey.length >= 16 && constantTimeCompare(key, serverKey);
 
     if (!isAuthorizedEmail || !isValidKey) {
       logAuditEvent({

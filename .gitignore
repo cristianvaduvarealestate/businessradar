@@ -26,6 +26,7 @@ downloads/
 .env.development.local
 .env.test.local
 .env.production.local
+.dev.vars
 
 # Debug logs
 npm-debug.log*
