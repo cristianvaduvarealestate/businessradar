@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDatabase } from '@/lib/db';
+import { queryOne, queryAll } from '@/lib/db';
 import { validateRequest } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  // Defense-in-depth auth check
   const auth = await validateRequest(request);
   if (!auth.authenticated) {
     return NextResponse.json(
@@ -15,80 +14,114 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const db = getDatabase();
+    const today = new Date().toISOString().slice(0, 10);
 
-    const totalCompanies = (db.prepare('SELECT COUNT(*) as count FROM companies').get() as any).count;
-    const activeCompanies = (db.prepare("SELECT COUNT(*) as count FROM companies WHERE status = 'ACTIVE'").get() as any).count;
-    
-    // Recent discovery windows
-    const newToday = (db.prepare("SELECT COUNT(*) as count FROM companies WHERE date(first_observed_at) = date('now')").get() as any).count;
-    const newThisWeek = (db.prepare("SELECT COUNT(*) as count FROM companies WHERE datetime(first_observed_at, '+7 days') >= datetime('now')").get() as any).count;
-    const newLast90Days = (db.prepare("SELECT COUNT(*) as count FROM companies WHERE datetime(first_observed_at, '+90 days') >= datetime('now')").get() as any).count;
-    
-    // Intelligence metrics
-    const withWebsite = (db.prepare("SELECT COUNT(*) as count FROM companies WHERE website IS NOT NULL AND website != ''").get() as any).count;
-    const withContacts = (db.prepare("SELECT COUNT(DISTINCT cui) as count FROM contact_records").get() as any).count;
-    const withFinancials = (db.prepare("SELECT COUNT(DISTINCT cui) as count FROM financial_records").get() as any).count;
-    const withOpportunities = (db.prepare("SELECT COUNT(DISTINCT cui) as count FROM insurance_opportunities").get() as any).count;
-    const highPriority = (db.prepare("SELECT COUNT(*) as count FROM companies WHERE prospect_priority IN ('HIGH', 'URGENT')").get() as any).count;
+    // 1. Core Company Totals
+    const compStats = (await queryOne(`
+      SELECT 
+        COUNT(*) as total_companies,
+        COUNT(CASE WHEN status = 'ACTIVE' THEN 1 END) as active_companies,
+        COUNT(CASE WHEN website IS NOT NULL AND website != '' THEN 1 END) as with_website,
+        COUNT(CASE WHEN prospect_priority IN ('HIGH', 'URGENT') THEN 1 END) as high_priority,
+        COUNT(CASE WHEN date(first_observed_at) = date('now') THEN 1 END) as new_today,
+        COUNT(CASE WHEN datetime(first_observed_at, '+90 days') >= datetime('now') THEN 1 END) as new_last_90_days
+      FROM companies
+    `)) || {};
 
-    // Top counties
-    const topCounties = db.prepare(`
+    // 2. Contact Verification Coverage
+    const contactStats = (await queryOne(`
+      SELECT 
+        COUNT(DISTINCT cui) as companies_with_any_contact,
+        COUNT(DISTINCT CASE WHEN contact_type LIKE '%PHONE%' THEN cui END) as with_phones,
+        COUNT(DISTINCT CASE WHEN contact_type = 'MOBILE' OR (contact_type LIKE '%PHONE%' AND (contact_value LIKE '+407%' OR contact_value LIKE '07%')) THEN cui END) as with_mobile,
+        COUNT(DISTINCT CASE WHEN contact_type = 'LANDLINE' OR (contact_type LIKE '%PHONE%' AND (contact_value LIKE '+402%' OR contact_value LIKE '02%' OR contact_value LIKE '+403%' OR contact_value LIKE '03%')) THEN cui END) as with_landline,
+        COUNT(DISTINCT CASE WHEN contact_type LIKE '%EMAIL%' THEN cui END) as with_emails,
+        COUNT(DISTINCT CASE WHEN verification_status = 'VERIFIED_OFFICIAL' OR verification_status = 'MANUALLY_CONFIRMED' THEN cui END) as verified_contacts
+      FROM contact_records
+    `)) || {};
+
+    // 3. Sales CRM Pipeline Metrics
+    const crmStats = (await queryOne(`
+      SELECT 
+        COUNT(CASE WHEN status IN ('NEW', 'NEW_DISCOVERED') THEN 1 END) as not_yet_contacted,
+        COUNT(CASE WHEN status IN ('CONTACTED', 'IN_DISCUSSION', 'INTERESTED', 'OFFER_REQUESTED', 'OFFER_SENT', 'NEGOTIATION') THEN 1 END) as in_contact,
+        COUNT(CASE WHEN status IN ('IN_DISCUSSION', 'INTERESTED', 'NEEDS_ANALYSIS') THEN 1 END) as in_discussion,
+        COUNT(CASE WHEN status IN ('OFFER_REQUESTED', 'OFFER_SENT') THEN 1 END) as offers_sent,
+        COUNT(CASE WHEN status = 'CLIENT_WON' THEN 1 END) as clients_won,
+        COUNT(CASE WHEN status IN ('LOST', 'NOT_INTERESTED') THEN 1 END) as lost_opportunities,
+        COUNT(CASE WHEN status = 'DO_NOT_CONTACT' THEN 1 END) as do_not_contact
+      FROM prospect_pipeline
+    `)) || {};
+
+    // 4. Follow-Up Metrics
+    const followUpStats = (await queryOne(`
+      SELECT 
+        COUNT(CASE WHEN due_date = ? AND status = 'PENDING' THEN 1 END) as followups_today,
+        COUNT(CASE WHEN due_date < ? AND status = 'PENDING' THEN 1 END) as followups_overdue,
+        COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) as followups_completed
+      FROM crm_follow_ups
+    `, [today, today])) || {};
+
+    // Conversion rate calculation
+    const totalEngaged = (crmStats.in_contact || 0) + (crmStats.clients_won || 0) + (crmStats.lost_opportunities || 0);
+    const conversionRate = totalEngaged > 0 ? Number(((crmStats.clients_won || 0) / totalEngaged * 100).toFixed(1)) : 0;
+
+    // Opportunities summary
+    const oppSummary = (await queryOne(`
+      SELECT 
+        COUNT(*) as total_opportunities,
+        COUNT(DISTINCT cui) as companies_with_opportunities
+      FROM insurance_opportunities
+    `)) || {};
+
+    // Opportunities by Category
+    const oppsByCategory = await queryAll(`
+      SELECT product_category, COUNT(*) as count 
+      FROM insurance_opportunities 
+      GROUP BY product_category 
+      ORDER BY count DESC
+    `);
+
+    // Top Counties
+    const topCounties = await queryAll(`
       SELECT county, COUNT(*) as count 
       FROM companies 
       WHERE county IS NOT NULL AND county != '' 
       GROUP BY county 
       ORDER BY count DESC 
       LIMIT 6
-    `).all() as any[];
+    `);
 
-    // Top CAEN industries
-    const topCaens = db.prepare(`
-      SELECT primary_caen, caen_description, COUNT(*) as count
-      FROM companies
-      WHERE primary_caen IS NOT NULL
-      GROUP BY primary_caen
-      ORDER BY count DESC
-      LIMIT 6
-    `).all() as any[];
+    // Pipeline status distribution
+    const pipelineStages = await queryAll(`
+      SELECT status, COUNT(*) as count 
+      FROM prospect_pipeline 
+      GROUP BY status
+    `);
 
-    // Recent Ingestion Jobs
-    const recentJobs = db.prepare(`
-      SELECT id, job_id, provider, scheduled_at, started_at, ended_at, status, 
-             records_processed, new_records, updated_records, duplicate_records, 
-             error_count, checkpoint, duration_ms, error_log
-      FROM ingestion_jobs
-      ORDER BY id DESC
-      LIMIT 5
-    `).all() as any[];
-
-    const lastSuccessfulJob = db.prepare(`
-      SELECT ended_at 
-      FROM ingestion_jobs 
-      WHERE status = 'SUCCESS' 
-      ORDER BY id DESC 
-      LIMIT 1
-    `).get() as any;
+    // Recent CRM activity count
+    const recentActivityCount = (await queryOne(`
+      SELECT COUNT(*) as count FROM crm_interactions WHERE datetime(created_at, '+7 days') >= datetime('now')
+    `))?.count || 0;
 
     return NextResponse.json(
       {
         success: true,
         data: {
-          totalCompanies,
-          activeCompanies,
-          newToday,
-          newThisWeek,
-          newLast90Days,
-          withWebsite,
-          withContacts,
-          withFinancials,
-          withOpportunities,
-          highPriority,
+          companies: compStats,
+          contacts: contactStats,
+          crm: {
+            ...crmStats,
+            conversion_rate: conversionRate,
+            recent_activity_count: recentActivityCount,
+          },
+          followups: followUpStats,
+          opportunities: {
+            ...oppSummary,
+            by_category: oppsByCategory,
+          },
           topCounties,
-          topCaens,
-          recentJobs,
-          lastSuccessfulSync: lastSuccessfulJob?.ended_at || null,
-          nextScheduledSync: 'Astăzi, 20:00 EET (Automated Cron)',
+          pipelineStages,
         },
       },
       {

@@ -16,6 +16,7 @@ dist/
 
 # Production
 data/*.db*
+data/backups/
 !data/.gitkeep
 temp/
 downloads/

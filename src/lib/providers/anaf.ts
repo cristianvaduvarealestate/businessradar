@@ -35,7 +35,8 @@ export class AnafTaxConnector implements CompanyDataProvider {
     supportsContacts: true,
   };
 
-  private anafEndpoint = 'https://webservicesp.anaf.ro/PlatitorTvaRest/api/v8/ws/tva';
+  private anafEndpoint = 'https://webservicesp.anaf.ro/api/PlatitorTvaRest/v9/tva';
+  private fallbackEndpoint = 'https://webservicesp.anaf.ro/PlatitorTvaRest/api/v8/ws/tva';
 
   async testConnection(): Promise<{ success: boolean; latencyMs: number; message: string }> {
     const start = Date.now();

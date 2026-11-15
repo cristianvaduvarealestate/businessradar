@@ -41,6 +41,24 @@ export class ContactDiscoveryConnector implements CompanyDataProvider {
     return null;
   }
 
+  classifyPhoneType(phone: string): 'MOBILE' | 'LANDLINE' | 'PHONE' {
+    const norm = this.normalizePhoneNumber(phone);
+    if (!norm) return 'PHONE';
+    if (norm.startsWith('+407')) return 'MOBILE';
+    if (norm.startsWith('+402') || norm.startsWith('+403')) return 'LANDLINE';
+    return 'PHONE';
+  }
+
+  isRomanianMobile(phone: string): boolean {
+    const norm = this.normalizePhoneNumber(phone);
+    return Boolean(norm && norm.startsWith('+407'));
+  }
+
+  isRomanianLandline(phone: string): boolean {
+    const norm = this.normalizePhoneNumber(phone);
+    return Boolean(norm && (norm.startsWith('+402') || norm.startsWith('+403')));
+  }
+
   isValidEmail(email: string): boolean {
     if (!email) return false;
     const re = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;

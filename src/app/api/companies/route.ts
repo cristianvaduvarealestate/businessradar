@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDatabase } from '@/lib/db';
+import { queryOne, queryAll } from '@/lib/db';
 import { getCategoriesForCaen, INDUSTRY_CATEGORIES } from '@/lib/caen';
 import { validateRequest } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
-  // Defense-in-depth auth check
   const auth = await validateRequest(request);
   if (!auth.authenticated) {
     return NextResponse.json(
@@ -17,7 +16,6 @@ export async function GET(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const db = getDatabase();
 
     const query = searchParams.get('q')?.trim() || '';
     const county = searchParams.get('county')?.trim() || '';
@@ -26,7 +24,12 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get('category')?.trim() || '';
     const priority = searchParams.get('priority')?.trim() || '';
     const status = searchParams.get('status')?.trim() || '';
+    const stage = searchParams.get('stage')?.trim() || '';
     const hasWebsite = searchParams.get('hasWebsite');
+    const hasPhone = searchParams.get('hasPhone');
+    const hasMobile = searchParams.get('hasMobile');
+    const hasLandline = searchParams.get('hasLandline');
+    const hasEmail = searchParams.get('hasEmail');
     const isNew = searchParams.get('isNew'); // 'true' for 90 days radar
 
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
@@ -59,8 +62,8 @@ export async function GET(request: NextRequest) {
     }
 
     if (caen) {
-      whereClauses.push('primary_caen = ?');
-      params.push(caen);
+      whereClauses.push('primary_caen LIKE ?');
+      params.push(`${caen}%`);
     }
 
     if (priority) {
@@ -73,8 +76,29 @@ export async function GET(request: NextRequest) {
       params.push(status);
     }
 
+    if (stage) {
+      whereClauses.push("EXISTS (SELECT 1 FROM prospect_pipeline pp WHERE pp.cui = companies.cui AND pp.status = ?)");
+      params.push(stage);
+    }
+
     if (hasWebsite === 'true') {
       whereClauses.push("website IS NOT NULL AND website != ''");
+    }
+
+    if (hasPhone === 'true') {
+      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%PHONE%')");
+    }
+
+    if (hasMobile === 'true') {
+      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'MOBILE' OR cr.contact_value LIKE '+407%' OR cr.contact_value LIKE '07%'))");
+    }
+
+    if (hasLandline === 'true') {
+      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'LANDLINE' OR cr.contact_value LIKE '+402%' OR cr.contact_value LIKE '02%' OR cr.contact_value LIKE '+403%' OR cr.contact_value LIKE '03%'))");
+    }
+
+    if (hasEmail === 'true') {
+      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%EMAIL%')");
     }
 
     if (isNew === 'true') {
@@ -95,12 +119,13 @@ export async function GET(request: NextRequest) {
 
     // Total Count
     const countSql = `SELECT COUNT(*) as total FROM companies ${whereSql}`;
-    const totalCount = (db.prepare(countSql).get(...params) as any).total;
+    const countRes = await queryOne<{ total: number }>(countSql, params);
+    const totalCount = countRes?.total ?? 0;
 
     // Sorting
     const sortField = searchParams.get('sort') || 'opportunity_score';
     const sortOrder = searchParams.get('order')?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-    const allowedSortFields = ['opportunity_score', 'first_observed_at', 'name', 'turnover', 'employees_avg'];
+    const allowedSortFields = ['opportunity_score', 'first_observed_at', 'name'];
     const safeSort = allowedSortFields.includes(sortField) ? sortField : 'opportunity_score';
 
     // Query Data
@@ -109,14 +134,19 @@ export async function GET(request: NextRequest) {
         id, cui, name, normalized_name, reg_com, legal_form, incorporation_date,
         country, county, city, primary_caen, caen_description, status,
         website, first_observed_at, last_observed_at, data_completeness_score,
-        opportunity_score, financial_trend, prospect_priority
+        opportunity_score, financial_trend, prospect_priority,
+        (SELECT pp.status FROM prospect_pipeline pp WHERE pp.cui = companies.cui) as crm_status,
+        (SELECT pp.next_follow_up_date FROM prospect_pipeline pp WHERE pp.cui = companies.cui) as next_follow_up_date,
+        (SELECT COUNT(*) FROM contact_records cr WHERE cr.cui = companies.cui) as contact_count,
+        (SELECT contact_value FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%PHONE%' LIMIT 1) as sample_phone,
+        (SELECT contact_value FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%EMAIL%' LIMIT 1) as sample_email
       FROM companies
       ${whereSql}
       ORDER BY ${safeSort} ${sortOrder}
       LIMIT ? OFFSET ?
     `;
 
-    const items = db.prepare(querySql).all(...params, limit, offset);
+    const items = await queryAll(querySql, [...params, limit, offset]);
 
     // Enrich with categories
     const enrichedItems = items.map((c: any) => ({
@@ -134,7 +164,7 @@ export async function GET(request: NextRequest) {
             limit,
             total: totalCount,
             totalItems: totalCount,
-            totalPages: Math.ceil(totalCount / limit),
+            totalPages: Math.ceil(totalCount / limit) || 1,
           },
         },
       },

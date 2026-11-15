@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   Search,
   Filter,
@@ -13,18 +14,34 @@ import {
   ChevronRight,
   ArrowUpDown,
   CheckCircle2,
+  Phone,
+  Mail,
+  Smartphone,
+  PhoneCall,
+  RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
 
-export default function CompaniesPage() {
+function CompaniesContent() {
+  const searchParams = useSearchParams();
+
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, totalPages: 1 });
 
   // Filters
-  const [query, setQuery] = useState('');
-  const [county, setCounty] = useState('');
-  const [priority, setPriority] = useState('');
-  const [status, setStatus] = useState('');
+  const [query, setQuery] = useState(searchParams?.get('q') || '');
+  const [county, setCounty] = useState(searchParams?.get('county') || '');
+  const [priority, setPriority] = useState(searchParams?.get('priority') || '');
+  const [status, setStatus] = useState(searchParams?.get('status') || '');
+  const [stage, setStage] = useState(searchParams?.get('stage') || '');
+  const [contactFilter, setContactFilter] = useState(
+    searchParams?.get('hasPhone') === 'true' ? 'hasPhone' :
+    searchParams?.get('hasMobile') === 'true' ? 'hasMobile' :
+    searchParams?.get('hasLandline') === 'true' ? 'hasLandline' :
+    searchParams?.get('hasEmail') === 'true' ? 'hasEmail' :
+    searchParams?.get('hasWebsite') === 'true' ? 'hasWebsite' : ''
+  );
 
   const fetchCompanies = async (page = 1) => {
     setLoading(true);
@@ -37,6 +54,13 @@ export default function CompaniesPage() {
       if (county) params.set('county', county);
       if (priority) params.set('priority', priority);
       if (status) params.set('status', status);
+      if (stage) params.set('stage', stage);
+
+      if (contactFilter === 'hasPhone') params.set('hasPhone', 'true');
+      if (contactFilter === 'hasMobile') params.set('hasMobile', 'true');
+      if (contactFilter === 'hasLandline') params.set('hasLandline', 'true');
+      if (contactFilter === 'hasEmail') params.set('hasEmail', 'true');
+      if (contactFilter === 'hasWebsite') params.set('hasWebsite', 'true');
 
       const res = await fetch(`/api/companies?${params.toString()}`);
       const data = await res.json();
@@ -59,7 +83,7 @@ export default function CompaniesPage() {
 
   useEffect(() => {
     fetchCompanies(1);
-  }, [county, priority, status]);
+  }, [county, priority, status, stage, contactFilter]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,12 +98,12 @@ export default function CompaniesPage() {
   };
 
   return (
-    <div className="p-8 space-y-6 max-w-7xl mx-auto w-full">
+    <div className="p-6 md:p-8 space-y-6 max-w-7xl mx-auto w-full">
       {/* Page Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-titanium-800 pb-5">
         <div>
           <div className="text-xs font-semibold text-titanium-400 uppercase tracking-wider">
-            Baza Națională de Date
+            Baza Națională de Date & Intelligence
           </div>
           <h1 className="text-2xl font-extrabold text-titanium-100 tracking-tight">
             Explorator Companii Românești
@@ -138,10 +162,23 @@ export default function CompaniesPage() {
             <option value="Iaşi">Iași</option>
             <option value="Braşov">Brașov</option>
             <option value="Constanţa">Constanța</option>
-            <option value="Prahova">Prahova</option>
             <option value="Bihor">Bihor</option>
+            <option value="Prahova">Prahova</option>
             <option value="Dolj">Dolj</option>
             <option value="Argeş">Argeș</option>
+          </select>
+
+          <select
+            value={contactFilter}
+            onChange={(e) => setContactFilter(e.target.value)}
+            className="bg-titanium-950 border border-titanium-800 text-titanium-200 px-3 py-1.5 rounded-lg text-xs focus:outline-none focus:border-radar-green"
+          >
+            <option value="">Toate contactele</option>
+            <option value="hasPhone">Doar cu telefoane</option>
+            <option value="hasMobile">Doar cu telefoane mobile (+407)</option>
+            <option value="hasLandline">Doar cu telefoane fixe (+402/+403)</option>
+            <option value="hasEmail">Doar cu adrese de email</option>
+            <option value="hasWebsite">Doar cu website oficial</option>
           </select>
 
           <select
@@ -150,120 +187,155 @@ export default function CompaniesPage() {
             className="bg-titanium-950 border border-titanium-800 text-titanium-200 px-3 py-1.5 rounded-lg text-xs focus:outline-none focus:border-radar-green"
           >
             <option value="">Toate Prioritățile</option>
-            <option value="URGENT">Urgent (Legal / Mandat)</option>
-            <option value="HIGH">Ridicată (Scor &gt;= 70%)</option>
+            <option value="URGENT">Urgent (Scor &gt; 85%)</option>
+            <option value="HIGH">Ridicată (Scor &gt; 70%)</option>
             <option value="STANDARD">Standard</option>
-            <option value="LOW">Scăzută</option>
           </select>
 
           <select
-            value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            value={stage}
+            onChange={(e) => setStage(e.target.value)}
             className="bg-titanium-950 border border-titanium-800 text-titanium-200 px-3 py-1.5 rounded-lg text-xs focus:outline-none focus:border-radar-green"
           >
-            <option value="">Toate Stările</option>
-            <option value="ACTIVE">Active (în funcțiune)</option>
-            <option value="RADIATED">Radiate</option>
+            <option value="">Toate Etapele CRM</option>
+            <option value="NEW">Nou</option>
+            <option value="TO_CONTACT">De contactat</option>
+            <option value="CONTACTED">Contactat</option>
+            <option value="IN_DISCUSSION">În discuție</option>
+            <option value="INTERESTED">Interesat</option>
+            <option value="OFFER_SENT">Ofertă transmisă</option>
+            <option value="CLIENT_WON">Client câștigat</option>
+            <option value="LOST">Pierdut</option>
           </select>
 
-          {(query || county || priority || status) && (
+          {(county || priority || status || stage || contactFilter || query) && (
             <button
               onClick={() => {
-                setQuery('');
                 setCounty('');
                 setPriority('');
                 setStatus('');
-                fetchCompanies(1);
+                setStage('');
+                setContactFilter('');
+                setQuery('');
               }}
-              className="text-xs text-rose-400 hover:underline ml-auto"
+              className="text-titanium-400 hover:text-white flex items-center gap-1 ml-auto"
             >
-              Resetează Filtre
+              <RefreshCw className="w-3 h-3" />
+              Resetează
             </button>
           )}
         </div>
       </div>
 
-      {/* Companies Results Table */}
+      {/* Companies Data Table */}
       <div className="bg-titanium-900 border border-titanium-800 rounded-xl overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-titanium-850 text-titanium-400 font-semibold border-b border-titanium-800">
-              <tr>
-                <th className="py-3 px-4">CUI & Companie</th>
-                <th className="py-3 px-4">RegCom & Formă</th>
-                <th className="py-3 px-4">Sediu Social</th>
-                <th className="py-3 px-4">Obiect de Activitate (CAEN)</th>
-                <th className="py-3 px-4 text-center">Oportunități</th>
-                <th className="py-3 px-4 text-right">Scor BI</th>
-                <th className="py-3 px-4 text-right">Acțiuni</th>
+          <table className="w-full text-left border-collapse text-xs">
+            <thead>
+              <tr className="border-b border-titanium-800 bg-titanium-950/60 text-titanium-400 font-semibold uppercase tracking-wider text-[11px]">
+                <th className="p-4">Companie & CUI</th>
+                <th className="p-4">Sediu & RegCom</th>
+                <th className="p-4">Activitate Principală (CAEN)</th>
+                <th className="p-4">Etapă CRM & Contacte</th>
+                <th className="p-4 text-right">Scor BI</th>
+                <th className="p-4 text-center">Acțiuni</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-titanium-800">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-titanium-500 font-mono">
-                    Se încarcă companiile din registrul național...
+                  <td colSpan={6} className="p-12 text-center text-titanium-500 font-mono">
+                    Se încarcă companiile din baza de date...
                   </td>
                 </tr>
               ) : items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-titanium-500">
+                  <td colSpan={6} className="p-12 text-center text-titanium-500">
                     Nicio companie găsită conform criteriilor selectate.
                   </td>
                 </tr>
               ) : (
-                items.map((c) => (
-                  <tr key={c.cui} className="hover:bg-titanium-850/60 transition-colors">
-                    <td className="py-3 px-4">
-                      <div className="font-bold text-titanium-100 hover:text-radar-green">
-                        <Link href={`/companies/${c.cui}`}>{c.name}</Link>
-                      </div>
-                      <div className="font-mono text-titanium-400 text-[11px] mt-0.5">
-                        CUI: <span className="text-titanium-200">{c.cui}</span>
-                      </div>
-                      {c.website && (
-                        <div className="text-[10px] text-radar-green flex items-center gap-1 mt-0.5">
-                          <Globe className="w-3 h-3" />
-                          {c.website}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 font-mono text-titanium-300">
-                      <div>{c.reg_com || '—'}</div>
-                      <span className="inline-block mt-0.5 px-1.5 py-0.5 text-[9px] font-bold rounded bg-titanium-800 border border-titanium-700 text-titanium-400">
-                        {c.legal_form || 'SRL'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-titanium-300">
-                      <div>{c.county || 'România'}</div>
-                      <div className="text-[11px] text-titanium-500">{c.city || '—'}</div>
-                    </td>
-                    <td className="py-3 px-4 max-w-xs">
-                      <div className="font-mono text-[11px] text-titanium-200">CAEN {c.primary_caen || '—'}</div>
-                      <div className="text-[11px] text-titanium-400 truncate">{c.caen_description || 'Consultanță'}</div>
-                    </td>
-                    <td className="py-3 px-4 text-center">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-radar-emerald/10 text-radar-green border border-radar-emerald/30">
-                        <ShieldCheck className="w-3 h-3" />
-                        {c.opp_count} polițe
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono">
-                      <div className="font-bold text-radar-green text-sm">{c.opportunity_score}%</div>
-                      <span className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded mt-0.5 ${
-                        c.prospect_priority === 'URGENT' ? 'bg-rose-500/20 text-rose-400' :
-                        c.prospect_priority === 'HIGH' ? 'bg-amber-500/20 text-amber-400' :
-                        'bg-titanium-800 text-titanium-400'
-                      }`}>
-                        {c.prospect_priority}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
+                items.map((company) => (
+                  <tr key={company.id} className="hover:bg-titanium-850/60 transition-colors">
+                    <td className="p-4 font-mono">
                       <Link
-                        href={`/companies/${c.cui}`}
-                        className="px-2.5 py-1 bg-titanium-800 hover:bg-radar-green hover:text-titanium-950 rounded text-[11px] font-medium border border-titanium-700 transition-colors"
+                        href={`/companies/${company.cui}`}
+                        className="font-bold text-sm text-titanium-100 hover:text-radar-green transition-colors block font-sans"
                       >
-                        Profil
+                        {company.name}
+                      </Link>
+                      <div className="text-titanium-400 text-xs mt-0.5 flex items-center gap-2">
+                        <span>CUI: <strong className="text-titanium-200">{company.cui}</strong></span>
+                        <span>•</span>
+                        <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-titanium-800 text-titanium-300">
+                          {company.legal_form || 'SRL'}
+                        </span>
+                      </div>
+                    </td>
+
+                    <td className="p-4">
+                      <div className="text-titanium-200 font-medium">
+                        {company.county}, {company.city}
+                      </div>
+                      <div className="text-titanium-500 font-mono text-[11px] mt-0.5">
+                        {company.reg_com || 'Nespecificat'}
+                      </div>
+                    </td>
+
+                    <td className="p-4 max-w-xs">
+                      <div className="font-mono text-radar-green font-bold text-[11px]">
+                        CAEN {company.primary_caen}
+                      </div>
+                      <div className="text-titanium-300 truncate text-[11px] mt-0.5" title={company.caen_description}>
+                        {company.caen_description}
+                      </div>
+                    </td>
+
+                    <td className="p-4">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-titanium-800 text-titanium-300 border border-titanium-700 w-fit">
+                          {company.crm_status || 'NOU'}
+                        </span>
+
+                        <div className="flex items-center gap-2 text-[11px] text-titanium-400 pt-0.5">
+                          {company.website && (
+                            <span className="text-radar-green flex items-center gap-0.5" title="Website disponibil">
+                              <Globe className="w-3 h-3" />
+                            </span>
+                          )}
+                          {company.sample_phone && (
+                            <span className="text-cyan-400 flex items-center gap-0.5 font-mono" title={company.sample_phone}>
+                              <Phone className="w-3 h-3" />
+                              {company.sample_phone}
+                            </span>
+                          )}
+                          {company.sample_email && (
+                            <span className="text-violet-400 flex items-center gap-0.5 font-mono" title={company.sample_email}>
+                              <Mail className="w-3 h-3" />
+                            </span>
+                          )}
+                          {!company.website && !company.sample_phone && !company.sample_email && (
+                            <span className="text-titanium-600 text-[10px] italic">Fără contact</span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="p-4 text-right font-mono">
+                      <div className="text-base font-bold text-radar-green">
+                        {company.opportunity_score}%
+                      </div>
+                      <div className="text-[10px] text-titanium-500">
+                        {company.prospect_priority}
+                      </div>
+                    </td>
+
+                    <td className="p-4 text-center">
+                      <Link
+                        href={`/companies/${company.cui}`}
+                        className="px-3 py-1.5 bg-titanium-800 hover:bg-titanium-700 text-titanium-100 rounded-lg text-xs font-semibold border border-titanium-700 transition-colors inline-block"
+                      >
+                        Dosar & CRM
                       </Link>
                     </td>
                   </tr>
@@ -273,7 +345,7 @@ export default function CompaniesPage() {
           </table>
         </div>
 
-        {/* Pagination Bar */}
+        {/* Pagination */}
         <div className="p-4 border-t border-titanium-800 bg-titanium-950/40 flex items-center justify-between text-xs text-titanium-400">
           <div>
             Afișate {(pagination.page - 1) * pagination.limit + 1} -{' '}
@@ -283,18 +355,18 @@ export default function CompaniesPage() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => fetchCompanies(pagination.page - 1)}
-              disabled={pagination.page <= 1}
-              className="p-1.5 rounded bg-titanium-850 border border-titanium-700 text-titanium-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-titanium-800"
+              disabled={pagination.page <= 1 || loading}
+              className="p-1.5 rounded-lg bg-titanium-800 border border-titanium-700 text-titanium-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-titanium-700 transition-colors"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
             <span className="font-mono text-titanium-200">
-              {pagination.page} / {pagination.totalPages}
+              Pagina {pagination.page} din {pagination.totalPages}
             </span>
             <button
               onClick={() => fetchCompanies(pagination.page + 1)}
-              disabled={pagination.page >= pagination.totalPages}
-              className="p-1.5 rounded bg-titanium-850 border border-titanium-700 text-titanium-200 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-titanium-800"
+              disabled={pagination.page >= pagination.totalPages || loading}
+              className="p-1.5 rounded-lg bg-titanium-800 border border-titanium-700 text-titanium-300 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-titanium-700 transition-colors"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -302,5 +374,21 @@ export default function CompaniesPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export const dynamic = 'force-dynamic';
+
+export default function CompaniesPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-[60vh]">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+        </div>
+      }
+    >
+      <CompaniesContent />
+    </Suspense>
   );
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDatabase } from '@/lib/db';
+import { queryOne, queryAll } from '@/lib/db';
 import { getCategoriesForCaen } from '@/lib/caen';
 import { validateRequest } from '@/lib/auth';
 
@@ -9,7 +9,6 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { cui: string } }
 ) {
-  // Defense-in-depth auth check
   const auth = await validateRequest(request);
   if (!auth.authenticated) {
     return NextResponse.json(
@@ -24,19 +23,21 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'CUI invalid' }, { status: 400 });
     }
 
-    const db = getDatabase();
-
-    const company = db.prepare('SELECT * FROM companies WHERE cui = ?').get(cui) as any;
+    const company = await queryOne('SELECT * FROM companies WHERE cui = ?', [cui]);
     if (!company) {
       return NextResponse.json({ success: false, error: 'Compania nu a fost găsită' }, { status: 404 });
     }
 
-    const taxRecord = db.prepare('SELECT * FROM tax_records WHERE cui = ?').get(cui);
-    const financials = db.prepare('SELECT * FROM financial_records WHERE cui = ? ORDER BY fiscal_year DESC').all(cui);
-    const contacts = db.prepare('SELECT * FROM contact_records WHERE cui = ? ORDER BY confidence_score DESC').all(cui);
-    const opportunities = db.prepare('SELECT * FROM insurance_opportunities WHERE cui = ? ORDER BY confidence_level DESC').all(cui);
-    const pipeline = db.prepare('SELECT * FROM prospect_pipeline WHERE cui = ?').get(cui);
-    const secondaryCaens = db.prepare('SELECT * FROM company_secondary_caen WHERE cui = ?').all(cui);
+    const taxRecord = await queryOne('SELECT * FROM tax_records WHERE cui = ?', [cui]);
+    const financials = await queryAll('SELECT * FROM financial_records WHERE cui = ? ORDER BY fiscal_year DESC', [cui]);
+    const contacts = await queryAll('SELECT * FROM contact_records WHERE cui = ? ORDER BY confidence_score DESC, discovered_at DESC', [cui]);
+    const opportunities = await queryAll('SELECT * FROM insurance_opportunities WHERE cui = ? ORDER BY confidence_level DESC', [cui]);
+    const pipeline = await queryOne('SELECT * FROM prospect_pipeline WHERE cui = ?', [cui]);
+    const interactions = await queryAll('SELECT * FROM crm_interactions WHERE cui = ? ORDER BY created_at DESC LIMIT 50', [cui]);
+    const followUps = await queryAll('SELECT * FROM crm_follow_ups WHERE cui = ? ORDER BY due_date ASC, created_at DESC', [cui]);
+    const statusHistory = await queryAll('SELECT * FROM crm_status_history WHERE cui = ? ORDER BY created_at DESC LIMIT 20', [cui]);
+    const secondaryCaens = await queryAll('SELECT * FROM company_secondary_caen WHERE cui = ?', [cui]);
+    const isSuppressed = await queryOne('SELECT * FROM suppression_list WHERE cui = ?', [cui]);
 
     return NextResponse.json(
       {
@@ -48,8 +49,12 @@ export async function GET(
           contacts,
           opportunities,
           pipeline,
+          interactions,
+          followUps,
+          statusHistory,
           secondaryCaens,
-          categories: getCategoriesForCaen(company.primary_caen),
+          isSuppressed: !!isSuppressed,
+          categories: getCategoriesForCaen(company.primary_caen || ''),
         },
       },
       {

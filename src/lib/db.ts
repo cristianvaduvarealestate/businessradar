@@ -1,6 +1,76 @@
 import { getEdgeDatabase } from './edge-db';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 
 let dbInstance: any = null;
+
+export function getD1Database(): any | null {
+  try {
+    const ctx = getCloudflareContext();
+    const env = ctx?.env as any;
+    if (env && env.DB) {
+      return env.DB;
+    }
+  } catch {
+    // Expected outside Cloudflare Workers execution context
+  }
+  return null;
+}
+
+export async function queryAll<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+  const d1 = getD1Database();
+  if (d1) {
+    const stmt = params.length > 0 ? d1.prepare(sql).bind(...params) : d1.prepare(sql);
+    const res = await stmt.all();
+    return (res.results || []) as T[];
+  }
+  const db = getDatabase();
+  if (db && typeof db.prepare === 'function') {
+    const res = db.prepare(sql).all(...params);
+    return (res || []) as T[];
+  }
+  return [];
+}
+
+export async function queryOne<T = any>(sql: string, params: any[] = []): Promise<T | null> {
+  const d1 = getD1Database();
+  if (d1) {
+    const stmt = params.length > 0 ? d1.prepare(sql).bind(...params) : d1.prepare(sql);
+    const res = await stmt.first();
+    return (res || null) as T | null;
+  }
+  const db = getDatabase();
+  if (db && typeof db.prepare === 'function') {
+    const res = db.prepare(sql).get(...params);
+    return (res || null) as T | null;
+  }
+  return null;
+}
+
+export async function executeRun(
+  sql: string,
+  params: any[] = []
+): Promise<{ success: boolean; changes: number; lastInsertRowid?: any }> {
+  const d1 = getD1Database();
+  if (d1) {
+    const stmt = params.length > 0 ? d1.prepare(sql).bind(...params) : d1.prepare(sql);
+    const res = await stmt.run();
+    return {
+      success: res.success !== false,
+      changes: res.meta?.changes ?? 1,
+      lastInsertRowid: res.meta?.last_row_id,
+    };
+  }
+  const db = getDatabase();
+  if (db && typeof db.prepare === 'function') {
+    const res = db.prepare(sql).run(...params);
+    return {
+      success: true,
+      changes: res.changes ?? 1,
+      lastInsertRowid: res.lastInsertRowid,
+    };
+  }
+  return { success: false, changes: 0 };
+}
 
 function isNodeEnvironment(): boolean {
   return (
@@ -180,10 +250,16 @@ export function initSchema(db: any) {
       cui INTEGER NOT NULL,
       contact_type TEXT NOT NULL,
       contact_value TEXT NOT NULL,
+      normalized_value TEXT,
       label TEXT DEFAULT 'OFFICE',
+      source_name TEXT,
       provenance_url TEXT,
+      verification_method TEXT,
       verification_status TEXT DEFAULT 'PUBLIC_UNVERIFIED',
       confidence_score REAL DEFAULT 0.5,
+      contact_person TEXT,
+      contact_person_position TEXT,
+      notes TEXT,
       discovered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       last_checked_at DATETIME,
       FOREIGN KEY (cui) REFERENCES companies(cui) ON DELETE CASCADE,
@@ -218,8 +294,8 @@ export function initSchema(db: any) {
     CREATE TABLE IF NOT EXISTS prospect_pipeline (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       cui INTEGER UNIQUE NOT NULL,
-      status TEXT DEFAULT 'NEW_DISCOVERED',
-      priority TEXT DEFAULT 'MEDIUM',
+      status TEXT DEFAULT 'NEW',
+      priority TEXT DEFAULT 'STANDARD',
       assigned_to TEXT,
       next_follow_up_date TEXT,
       products_discussed TEXT,
@@ -230,6 +306,59 @@ export function initSchema(db: any) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_pipeline_status ON prospect_pipeline(status);
+
+    -- 8b. CRM Interactions Log
+    CREATE TABLE IF NOT EXISTS crm_interactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cui INTEGER NOT NULL,
+      interaction_type TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      notes TEXT NOT NULL,
+      contact_person TEXT,
+      contact_value TEXT,
+      next_action TEXT,
+      next_follow_up_date TEXT,
+      user_responsible TEXT DEFAULT 'myremaxclubcristianv@gmail.com',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (cui) REFERENCES companies(cui) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_crm_interactions_cui ON crm_interactions(cui);
+    CREATE INDEX IF NOT EXISTS idx_crm_interactions_created ON crm_interactions(created_at DESC);
+
+    -- 8c. CRM Follow-Up Tasks
+    CREATE TABLE IF NOT EXISTS crm_follow_ups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cui INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      due_date TEXT NOT NULL,
+      priority TEXT DEFAULT 'MEDIUM',
+      status TEXT DEFAULT 'PENDING',
+      completed_at DATETIME,
+      completed_by TEXT,
+      created_by TEXT DEFAULT 'myremaxclubcristianv@gmail.com',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (cui) REFERENCES companies(cui) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_crm_follow_ups_cui ON crm_follow_ups(cui);
+    CREATE INDEX IF NOT EXISTS idx_crm_follow_ups_due ON crm_follow_ups(due_date);
+    CREATE INDEX IF NOT EXISTS idx_crm_follow_ups_status ON crm_follow_ups(status);
+
+    -- 8d. CRM Status Change History
+    CREATE TABLE IF NOT EXISTS crm_status_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      cui INTEGER NOT NULL,
+      old_status TEXT,
+      new_status TEXT NOT NULL,
+      reason TEXT,
+      changed_by TEXT DEFAULT 'myremaxclubcristianv@gmail.com',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (cui) REFERENCES companies(cui) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_crm_status_hist_cui ON crm_status_history(cui);
 
     -- 9. Suppression List (DO NOT CONTACT)
     CREATE TABLE IF NOT EXISTS suppression_list (

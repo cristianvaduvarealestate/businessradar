@@ -2,10 +2,24 @@ import { getDatabase } from './db';
 
 export interface AuditEvent {
   user: string;
-  action: 'EXPORT' | 'PIPELINE_UPDATE' | 'AUTH_LOGIN' | 'AUTH_FAILED' | 'SETTINGS_CHANGE';
+  action:
+    | 'EXPORT'
+    | 'PIPELINE_UPDATE'
+    | 'PIPELINE_STATUS_UPDATE'
+    | 'CRM_INTERACTION_CREATED'
+    | 'CRM_FOLLOW_UP_CREATED'
+    | 'CRM_FOLLOW_UP_UPDATED'
+    | 'CONTACT_RECORD_UPSERT'
+    | 'CONTACT_RECORD_DELETED'
+    | 'OPPORTUNITY_STATUS_UPDATE'
+    | 'SUPPRESSION_ADDED'
+    | 'SUPPRESSION_REMOVED'
+    | 'AUTH_LOGIN'
+    | 'AUTH_FAILED'
+    | 'SETTINGS_CHANGE';
   resource?: string;
   details?: Record<string, any>;
-  status: 'SUCCESS' | 'DENIED' | 'FAILED';
+  status: 'SUCCESS' | 'DENIED' | 'FAILED' | 'ALLOWED';
   ip?: string;
 }
 
