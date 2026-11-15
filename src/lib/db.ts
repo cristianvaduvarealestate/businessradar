@@ -1,35 +1,57 @@
-import Database from 'better-sqlite3';
-import path from 'path';
-import fs from 'fs';
+import { getEdgeDatabase } from './edge-db';
 
-const DB_PATH = process.env.DATABASE_PATH || path.join(process.cwd(), 'data', 'radar_business.db');
+let dbInstance: any = null;
 
-// Ensure data directory exists
-const dbDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+function isNodeEnvironment(): boolean {
+  return (
+    typeof process !== 'undefined' &&
+    process.release?.name === 'node' &&
+    !process.env.NEXT_RUNTIME &&
+    typeof (globalThis as any).WebSocketPair === 'undefined'
+  );
 }
 
-let dbInstance: Database.Database | null = null;
-
-export function getDatabase(): Database.Database {
+export function getDatabase(): any {
   if (dbInstance) return dbInstance;
 
-  dbInstance = new Database(DB_PATH);
+  if (isNodeEnvironment()) {
+    try {
+      // Dynamically require Node-only modules
+      const Database = require('better-sqlite3');
+      const path = require('path');
+      const fs = require('fs');
 
-  // Performance Pragmas
-  dbInstance.pragma('journal_mode = WAL');
-  dbInstance.pragma('synchronous = NORMAL');
-  dbInstance.pragma('foreign_keys = ON');
-  dbInstance.pragma('cache_size = -64000'); // 64MB memory cache
-  dbInstance.pragma('temp_store = MEMORY');
+      const DB_PATH = process.env.DATABASE_PATH || path.join(process.cwd(), 'data', 'radar_business.db');
+      const dbDir = path.dirname(DB_PATH);
+      if (!fs.existsSync(dbDir)) {
+        fs.mkdirSync(dbDir, { recursive: true });
+      }
 
-  initSchema(dbInstance);
+      const db = new Database(DB_PATH);
+      db.pragma('journal_mode = WAL');
+      db.pragma('synchronous = NORMAL');
+      db.pragma('foreign_keys = ON');
+      db.pragma('cache_size = -64000');
+      db.pragma('temp_store = MEMORY');
 
+      initSchema(db);
+      dbInstance = db;
+      return dbInstance;
+    } catch (err) {
+      console.warn('Native SQLite unavailable, using Edge Database adapter:', err);
+      dbInstance = getEdgeDatabase();
+      return dbInstance;
+    }
+  }
+
+  // Edge / Cloudflare Workers environment
+  dbInstance = getEdgeDatabase();
   return dbInstance;
 }
 
-export function initSchema(db: Database.Database) {
+export function initSchema(db: any) {
+  if (!db || typeof db.exec !== 'function') return;
+
   db.exec(`
     -- 1. Master Companies Table
     CREATE TABLE IF NOT EXISTS companies (
