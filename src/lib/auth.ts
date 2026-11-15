@@ -6,11 +6,23 @@ export const AUTHORIZED_ADMIN_EMAILS = [
 
 /**
  * Retrieves the internal administrative security key from environment variables.
+ * Exclusively used for HMAC session token signing and internal cryptographic operations.
  * Fails closed (returns empty string) if not configured. Hardcoded secrets are strictly prohibited.
  */
 export function getInternalSecurityKey(): string {
   const key = process.env.RADAR_SECURITY_KEY || process.env.ADMIN_KEY || '';
   return key.trim();
+}
+
+/**
+ * Retrieves the dedicated administrator web login passkey from environment variables.
+ * RADAR_ADMIN_PASSKEY is strictly the ONLY credential accepted for administrator login.
+ * Fallback to RADAR_SECURITY_KEY or ADMIN_PASSKEY is completely removed.
+ * Returns empty string if unconfigured. Never uses hardcoded defaults.
+ */
+export function getAdminPasskey(): string {
+  const passkey = process.env.RADAR_ADMIN_PASSKEY || '';
+  return passkey.trim();
 }
 
 /**

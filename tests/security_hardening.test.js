@@ -236,3 +236,78 @@ test('Rate limiter blocks excessive calls beyond threshold', () => {
   assert.strictEqual(check('1.2.3.4').allowed, true, 'Request 3 allowed');
   assert.strictEqual(check('1.2.3.4').allowed, false, 'Request 4 must be rate limited');
 });
+
+// Test 12: Dedicated administrator passkey authentication (strictly RADAR_ADMIN_PASSKEY only)
+test('Administrator passkey strictly requires RADAR_ADMIN_PASSKEY without fallbacks', () => {
+  const AUTHORIZED_ADMIN = 'myremaxclubcristianv@gmail.com';
+
+  function resolveAdminPasskey(env = {}) {
+    return (env.RADAR_ADMIN_PASSKEY || '').trim();
+  }
+
+  function validateLogin(email, key, env = {}) {
+    const isAuthorizedEmail = (email || '').toLowerCase() === AUTHORIZED_ADMIN.toLowerCase();
+    const adminPasskey = resolveAdminPasskey(env);
+
+    // If missing or shorter than 12 characters, return HTTP 503
+    if (!adminPasskey || adminPasskey.length < 12) {
+      return { success: false, status: 503, error: 'passkey_unconfigured' };
+    }
+
+    // Constant-time comparison simulation
+    const lenA = key.length;
+    const lenB = adminPasskey.length;
+    let diff = lenA ^ lenB;
+    for (let i = 0; i < lenA; i++) {
+      diff |= key.charCodeAt(i) ^ (i < lenB ? adminPasskey.charCodeAt(i) : 0);
+    }
+    const isValidKey = diff === 0;
+
+    if (!isAuthorizedEmail || !isValidKey) {
+      return { success: false, status: 401, error: 'invalid_credentials' };
+    }
+
+    return { success: true, status: 200, user: email };
+  }
+
+  // 1. Correct RADAR_ADMIN_PASSKEY authenticates successfully
+  const success = validateLogin(AUTHORIZED_ADMIN, 'MySuperSecretPasskey2026!', {
+    RADAR_ADMIN_PASSKEY: 'MySuperSecretPasskey2026!',
+  });
+  assert.strictEqual(success.status, 200);
+  assert.strictEqual(success.user, AUTHORIZED_ADMIN);
+
+  // 2. Wrong passkey is rejected with HTTP 401
+  const wrongKey = validateLogin(AUTHORIZED_ADMIN, 'WrongPasskey12345!', {
+    RADAR_ADMIN_PASSKEY: 'MySuperSecretPasskey2026!',
+  });
+  assert.strictEqual(wrongKey.status, 401);
+  assert.strictEqual(wrongKey.error, 'invalid_credentials');
+
+  // 3. Missing RADAR_ADMIN_PASSKEY returns HTTP 503
+  const missing = validateLogin(AUTHORIZED_ADMIN, 'AnyPassword1234!', {});
+  assert.strictEqual(missing.status, 503);
+  assert.strictEqual(missing.error, 'passkey_unconfigured');
+
+  // 4. RADAR_SECURITY_KEY alone CANNOT authenticate an administrator (must return 503)
+  const secKeyOnly = validateLogin(
+    AUTHORIZED_ADMIN,
+    'c71dc872e92e6ab8e3da577bc2a03aa825a9b5567dd2ace21e32d773487f0d10',
+    { RADAR_SECURITY_KEY: 'c71dc872e92e6ab8e3da577bc2a03aa825a9b5567dd2ace21e32d773487f0d10' }
+  );
+  assert.strictEqual(secKeyOnly.status, 503, 'RADAR_SECURITY_KEY alone must not satisfy admin login');
+
+  // 5. ADMIN_PASSKEY alone CANNOT authenticate an administrator (must return 503)
+  const legacyPasskey = validateLogin(
+    AUTHORIZED_ADMIN,
+    'SomeLegacyPassword2026!',
+    { ADMIN_PASSKEY: 'SomeLegacyPassword2026!' }
+  );
+  assert.strictEqual(legacyPasskey.status, 503, 'ADMIN_PASSKEY alone must not satisfy admin login');
+
+  // 6. Source code audit: ensure auth.ts getAdminPasskey does not contain fallbacks
+  const authPath = path.join(__dirname, '..', 'src', 'lib', 'auth.ts');
+  const authContent = fs.readFileSync(authPath, 'utf8');
+  assert.doesNotMatch(authContent, /process\.env\.ADMIN_PASSKEY/, 'auth.ts must not reference ADMIN_PASSKEY');
+  assert.match(authContent, /process\.env\.RADAR_ADMIN_PASSKEY/, 'auth.ts must reference RADAR_ADMIN_PASSKEY');
+});

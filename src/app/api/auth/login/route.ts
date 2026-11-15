@@ -3,6 +3,7 @@ import {
   AUTHORIZED_ADMIN_EMAILS,
   constantTimeCompare,
   createSessionToken,
+  getAdminPasskey,
   getInternalSecurityKey,
 } from '@/lib/auth';
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
@@ -50,8 +51,27 @@ export async function POST(request: NextRequest) {
     const isAuthorizedEmail = AUTHORIZED_ADMIN_EMAILS.some(
       (admin) => admin.toLowerCase() === email
     );
-    const serverKey = getInternalSecurityKey();
-    const isValidKey = serverKey.length >= 16 && constantTimeCompare(key, serverKey);
+    const adminPasskey = getAdminPasskey();
+
+    if (!adminPasskey || adminPasskey.length < 12) {
+      logAuditEvent({
+        user: email || 'unknown',
+        action: 'AUTH_FAILED',
+        details: { reason: 'passkey_unconfigured_on_server', ip },
+        status: 'DENIED',
+        ip,
+      });
+
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Autentificarea administrativă nu este încă configurată pe server (setați secretul RADAR_ADMIN_PASSKEY).',
+        },
+        { status: 503 }
+      );
+    }
+
+    const isValidKey = constantTimeCompare(key, adminPasskey);
 
     if (!isAuthorizedEmail || !isValidKey) {
       logAuditEvent({
