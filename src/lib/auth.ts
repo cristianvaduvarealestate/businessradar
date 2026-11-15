@@ -5,24 +5,36 @@ export const AUTHORIZED_ADMIN_EMAILS = [
 ];
 
 /**
- * Retrieves the internal administrative security key from environment variables.
+ * Retrieves the internal administrative security key from environment variables or Cloudflare context.
  * Exclusively used for HMAC session token signing and internal cryptographic operations.
  * Fails closed (returns empty string) if not configured. Hardcoded secrets are strictly prohibited.
  */
 export function getInternalSecurityKey(): string {
-  const key = process.env.RADAR_SECURITY_KEY || process.env.ADMIN_KEY || '';
-  return key.trim();
+  const envVal = process.env.RADAR_SECURITY_KEY || process.env.ADMIN_KEY || '';
+  if (envVal) return envVal.trim();
+  try {
+    const cfContext = (globalThis as any)[Symbol.for('__cloudflare-context__')];
+    return (cfContext?.env?.RADAR_SECURITY_KEY || cfContext?.env?.ADMIN_KEY || '').trim();
+  } catch {
+    return '';
+  }
 }
 
 /**
- * Retrieves the dedicated administrator web login passkey from environment variables.
+ * Retrieves the dedicated administrator web login passkey from environment variables or Cloudflare context.
  * RADAR_ADMIN_PASSKEY is strictly the ONLY credential accepted for administrator login.
  * Fallback to RADAR_SECURITY_KEY or ADMIN_PASSKEY is completely removed.
  * Returns empty string if unconfigured. Never uses hardcoded defaults.
  */
 export function getAdminPasskey(): string {
-  const passkey = process.env.RADAR_ADMIN_PASSKEY || '';
-  return passkey.trim();
+  const envVal = process.env.RADAR_ADMIN_PASSKEY || '';
+  if (envVal) return envVal.trim();
+  try {
+    const cfContext = (globalThis as any)[Symbol.for('__cloudflare-context__')];
+    return (cfContext?.env?.RADAR_ADMIN_PASSKEY || '').trim();
+  } catch {
+    return '';
+  }
 }
 
 /**
