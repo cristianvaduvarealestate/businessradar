@@ -5,19 +5,54 @@ export const AUTHORIZED_ADMIN_EMAILS = [
 ];
 
 /**
+ * Safely retrieves an environment variable from process.env, OpenNext Cloudflare context,
+ * or global Cloudflare runtime symbol. Avoids Webpack compile-time dead-code inlining.
+ */
+function getEnvValue(keyName: string): string {
+  // 1. Check process.env via dynamic key lookup (references process.env.RADAR_ADMIN_PASSKEY and process.env.RADAR_SECURITY_KEY)
+  try {
+    if (typeof process !== 'undefined' && process.env) {
+      const val = process.env[keyName];
+      if (val && typeof val === 'string' && val.trim().length > 0) {
+        return val.trim();
+      }
+    }
+  } catch {
+    // Ignore
+  }
+
+  // 2. Check OpenNext Cloudflare runtime context
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getCloudflareContext } = require('@opennextjs/cloudflare');
+    const ctx = getCloudflareContext();
+    if (ctx?.env?.[keyName] && typeof ctx.env[keyName] === 'string') {
+      return ctx.env[keyName].trim();
+    }
+  } catch {
+    // Ignore
+  }
+
+  // 3. Check Cloudflare global symbol
+  try {
+    const cf = (globalThis as any)[Symbol.for('__cloudflare-context__')];
+    if (cf?.env?.[keyName] && typeof cf.env[keyName] === 'string') {
+      return cf.env[keyName].trim();
+    }
+  } catch {
+    // Ignore
+  }
+
+  return '';
+}
+
+/**
  * Retrieves the internal administrative security key from environment variables or Cloudflare context.
  * Exclusively used for HMAC session token signing and internal cryptographic operations.
  * Fails closed (returns empty string) if not configured. Hardcoded secrets are strictly prohibited.
  */
 export function getInternalSecurityKey(): string {
-  const envVal = process.env.RADAR_SECURITY_KEY || process.env.ADMIN_KEY || '';
-  if (envVal) return envVal.trim();
-  try {
-    const cfContext = (globalThis as any)[Symbol.for('__cloudflare-context__')];
-    return (cfContext?.env?.RADAR_SECURITY_KEY || cfContext?.env?.ADMIN_KEY || '').trim();
-  } catch {
-    return '';
-  }
+  return getEnvValue('RADAR_SECURITY_KEY') || getEnvValue('ADMIN_KEY');
 }
 
 /**
@@ -27,14 +62,7 @@ export function getInternalSecurityKey(): string {
  * Returns empty string if unconfigured. Never uses hardcoded defaults.
  */
 export function getAdminPasskey(): string {
-  const envVal = process.env.RADAR_ADMIN_PASSKEY || '';
-  if (envVal) return envVal.trim();
-  try {
-    const cfContext = (globalThis as any)[Symbol.for('__cloudflare-context__')];
-    return (cfContext?.env?.RADAR_ADMIN_PASSKEY || '').trim();
-  } catch {
-    return '';
-  }
+  return getEnvValue('RADAR_ADMIN_PASSKEY');
 }
 
 /**
