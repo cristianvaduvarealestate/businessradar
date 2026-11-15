@@ -14,12 +14,14 @@ import {
   BarChart3,
   LogOut,
   ShieldAlert,
+  Sparkles,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Overview', icon: BarChart3 },
   { href: '/radar', label: 'Radar Firme Noi', icon: Compass, badge: 'LIVE' },
   { href: '/companies', label: 'Baza Națională', icon: Building2 },
+  { href: '/enrichment', label: 'Motor Contacte B2B', icon: Sparkles, badge: 'AUTO' },
   { href: '/industries', label: 'Sectoare CAEN', icon: Layers },
   { href: '/insurance', label: 'Oportunități Asigurare', icon: ShieldCheck, highlight: true },
   { href: '/pipeline', label: 'Pipeline Vânzări CRM', icon: TrendingUp },

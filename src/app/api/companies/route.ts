@@ -30,6 +30,9 @@ export async function GET(request: NextRequest) {
     const hasMobile = searchParams.get('hasMobile');
     const hasLandline = searchParams.get('hasLandline');
     const hasEmail = searchParams.get('hasEmail');
+    const hasAnyContact = searchParams.get('hasAnyContact');
+    const noContact = searchParams.get('noContact');
+    const needsVerification = searchParams.get('needsVerification');
     const isNew = searchParams.get('isNew'); // 'true' for 90 days radar
 
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
@@ -101,6 +104,18 @@ export async function GET(request: NextRequest) {
       whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%EMAIL%')");
     }
 
+    if (hasAnyContact === 'true') {
+      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui)");
+    }
+
+    if (noContact === 'true') {
+      whereClauses.push("NOT EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui)");
+    }
+
+    if (needsVerification === 'true') {
+      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND cr.verification_status IN ('UNVERIFIED', 'FORMAT_VALID_ONLY', 'PUBLIC_UNVERIFIED'))");
+    }
+
     if (isNew === 'true') {
       whereClauses.push("datetime(first_observed_at, '+90 days') >= datetime('now')");
     }
@@ -138,8 +153,12 @@ export async function GET(request: NextRequest) {
         (SELECT pp.status FROM prospect_pipeline pp WHERE pp.cui = companies.cui) as crm_status,
         (SELECT pp.next_follow_up_date FROM prospect_pipeline pp WHERE pp.cui = companies.cui) as next_follow_up_date,
         (SELECT COUNT(*) FROM contact_records cr WHERE cr.cui = companies.cui) as contact_count,
-        (SELECT contact_value FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%PHONE%' LIMIT 1) as sample_phone,
-        (SELECT contact_value FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%EMAIL%' LIMIT 1) as sample_email
+        (SELECT COUNT(*) FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'MOBILE' OR cr.contact_value LIKE '+407%' OR cr.contact_value LIKE '07%')) as has_mobile,
+        (SELECT COUNT(*) FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'LANDLINE' OR cr.contact_value LIKE '+402%' OR cr.contact_value LIKE '02%' OR cr.contact_value LIKE '+403%' OR cr.contact_value LIKE '03%')) as has_landline,
+        (SELECT COUNT(*) FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%EMAIL%') as has_email,
+        (SELECT CASE WHEN companies.website IS NOT NULL AND companies.website != '' THEN 1 ELSE 0 END) as has_website,
+        (SELECT COALESCE(cr.normalized_value, cr.contact_value) FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'MOBILE' OR cr.contact_type = 'LANDLINE' OR cr.contact_type LIKE '%PHONE%') ORDER BY cr.confidence_score DESC LIMIT 1) as sample_phone,
+        (SELECT COALESCE(cr.normalized_value, cr.contact_value) FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%EMAIL%' ORDER BY cr.confidence_score DESC LIMIT 1) as sample_email
       FROM companies
       ${whereSql}
       ORDER BY ${safeSort} ${sortOrder}

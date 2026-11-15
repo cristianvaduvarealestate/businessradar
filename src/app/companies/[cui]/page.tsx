@@ -34,6 +34,8 @@ import {
   AlertOctagon,
   ChevronRight,
   Filter,
+  Sparkles,
+  RefreshCw,
 } from 'lucide-react';
 
 const CRM_STATUSES = [
@@ -119,6 +121,33 @@ export default function CompanyDetailPage() {
   useEffect(() => {
     if (cui) loadData();
   }, [cui]);
+
+  const [enrichLoading, setEnrichLoading] = useState(false);
+  const [enrichResultMsg, setEnrichResultMsg] = useState<string | null>(null);
+
+  const handleEnrich = async () => {
+    setEnrichLoading(true);
+    setEnrichResultMsg(null);
+    try {
+      const res = await fetch(`/api/enrichment/company/${cui}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forceRefresh: true }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        const foundCount = json.data?.contactsDiscovered?.length || 0;
+        setEnrichResultMsg(`Îmbogățire finalizată: ${foundCount} coordonate identificate.`);
+        loadData();
+      } else {
+        setEnrichResultMsg(`Eroare: ${json.error || 'Indisponibil'}`);
+      }
+    } catch (err: any) {
+      setEnrichResultMsg(`Eroare: ${err.message}`);
+    } finally {
+      setEnrichLoading(false);
+    }
+  };
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -656,40 +685,67 @@ export default function CompanyDetailPage() {
       {/* Tab 2: Contacts */}
       {activeTab === 'contacts' && (
         <div className="bg-titanium-900 border border-titanium-800 rounded-xl p-6 space-y-6">
-          <div className="flex items-center justify-between border-b border-titanium-800 pb-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-titanium-800 pb-4">
             <div>
               <h2 className="text-sm font-bold text-titanium-100 uppercase tracking-wider flex items-center gap-2">
                 <Phone className="w-4 h-4 text-radar-green" />
-                Registru Coordonate & Date de Contact
+                Registru Coordonate &amp; Date de Contact Verificate
               </h2>
               <p className="text-xs text-titanium-400 mt-0.5">
-                Coordonate verificate și declarate oficial. Niciun contact nu este generat artificial.
+                Date reale obținute din surse deschise și verificate (ANAF, Web oficial, Broker). Niciun contact nu este generat artificial.
               </p>
             </div>
-            <button
-              onClick={() => setShowContactModal(true)}
-              className="px-3.5 py-1.5 bg-radar-green text-titanium-950 font-bold text-xs rounded-lg hover:bg-emerald-400 transition-colors flex items-center gap-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              Adaugă Coordonată
-            </button>
-          </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleEnrich}
+                disabled={enrichLoading}
+                className="px-3.5 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 font-semibold text-xs rounded-lg border border-emerald-500/30 transition-colors flex items-center gap-1.5"
+              >
+                <Sparkles className={`w-3.5 h-3.5 ${enrichLoading ? 'animate-spin' : ''}`} />
+                {enrichLoading ? 'Se verifică sursele...' : 'Îmbogățește Automat (ANAF & Web)'}
+              </button>
 
-          {contacts.length === 0 && !company.website ? (
-            <div className="py-12 text-center space-y-3">
-              <Phone className="w-8 h-8 text-titanium-600 mx-auto" />
-              <div className="text-xs text-titanium-400 font-semibold">
-                Informații indisponibile în surse deschise verificate
-              </div>
-              <p className="text-[11px] text-titanium-500 max-w-md mx-auto">
-                Această companie nu are numere de telefon sau email-uri publicate în streamul oficial inițial. Poți adăuga un contact obținut și verificat direct.
-              </p>
               <button
                 onClick={() => setShowContactModal(true)}
-                className="px-3.5 py-1.5 bg-titanium-800 hover:bg-titanium-700 text-titanium-200 text-xs rounded-lg border border-titanium-700 transition-colors"
+                className="px-3.5 py-1.5 bg-titanium-800 hover:bg-titanium-700 text-titanium-200 font-bold text-xs rounded-lg border border-titanium-700 transition-colors flex items-center gap-1.5"
               >
-                Adaugă Primul Contact
+                <Plus className="w-4 h-4" />
+                Adaugă Contact Manual
               </button>
+            </div>
+          </div>
+
+          {enrichResultMsg && (
+            <div className="p-3 rounded-lg bg-titanium-950 border border-titanium-800 text-xs text-emerald-300 font-mono">
+              {enrichResultMsg}
+            </div>
+          )}
+
+          {contacts.length === 0 && !company.website ? (
+            <div className="py-10 text-center space-y-3">
+              <Phone className="w-8 h-8 text-titanium-600 mx-auto" />
+              <div className="text-sm text-titanium-300 font-semibold">
+                Nu am identificat încă date de contact în sursele verificate.
+              </div>
+              <p className="text-xs text-titanium-500 max-w-md mx-auto">
+                Surse verificate: Evidențele publice ANAF (PlatitorTvaRest) și Registrul Comerțului. Poți lansa motorul automat de îmbogățire sau poți adăuga un contact verificat direct.
+              </p>
+              <div className="flex items-center justify-center gap-3 pt-2">
+                <button
+                  onClick={handleEnrich}
+                  disabled={enrichLoading}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Lansează Căutarea în ANAF &amp; Web
+                </button>
+                <button
+                  onClick={() => setShowContactModal(true)}
+                  className="px-4 py-2 bg-titanium-800 hover:bg-titanium-700 text-titanium-200 text-xs rounded-lg border border-titanium-700 transition-colors"
+                >
+                  Adaugă Contact Manual
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -703,7 +759,7 @@ export default function CompanyDetailPage() {
                       {company.website}
                     </div>
                     <div className="text-[10px] text-titanium-500 font-mono">
-                      Sursă: Registrul Comerțului (ONRC)
+                      Sursă: Web Official / Registru Oficial
                     </div>
                   </div>
                   <a
@@ -711,6 +767,7 @@ export default function CompanyDetailPage() {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="p-2 bg-titanium-800 hover:bg-titanium-700 text-radar-green rounded-lg border border-titanium-700 transition-colors"
+                    title="Deschide site oficial"
                   >
                     <ExternalLink className="w-4 h-4" />
                   </a>
@@ -725,37 +782,54 @@ export default function CompanyDetailPage() {
                         <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-titanium-800 text-titanium-300 border border-titanium-700">
                           {c.contact_type} ({c.label || 'OFFICE'})
                         </span>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                          c.verification_status?.includes('VERIFIED') || c.verification_status === 'MANUALLY_CONFIRMED'
-                            ? 'bg-emerald-500/20 text-emerald-400'
-                            : 'bg-amber-500/20 text-amber-400'
-                        }`}>
+                        <span
+                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                            c.verification_status === 'OFFICIAL_REGISTER' ||
+                            c.verification_status === 'OFFICIAL_WEBSITE' ||
+                            c.verification_status === 'MANUALLY_CONFIRMED'
+                              ? 'bg-emerald-500/20 text-emerald-400'
+                              : 'bg-blue-500/20 text-blue-400'
+                          }`}
+                        >
                           {c.verification_status}
                         </span>
                       </div>
+
                       <div className="text-base font-bold font-mono text-titanium-100 pt-1.5 flex items-center gap-2">
-                        {c.contact_value}
+                        {c.normalized_value || c.contact_value}
                         <button
-                          onClick={() => copyToClipboard(c.contact_value)}
+                          onClick={() => copyToClipboard(c.normalized_value || c.contact_value)}
                           className="text-titanium-500 hover:text-white"
-                          title="Copiază"
+                          title="Copiază în clipboard"
                         >
-                          {copiedText === c.contact_value ? <Check className="w-3.5 h-3.5 text-radar-green" /> : <Copy className="w-3.5 h-3.5" />}
+                          {copiedText === (c.normalized_value || c.contact_value) ? (
+                            <Check className="w-3.5 h-3.5 text-radar-green" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
                         </button>
                       </div>
+
                       {c.contact_person && (
                         <div className="text-xs text-titanium-300 pt-0.5">
-                          Persoană: <strong>{c.contact_person}</strong> {c.contact_person_position && `(${c.contact_person_position})`}
+                          Persoană de contact: <strong>{c.contact_person}</strong>{' '}
+                          {c.contact_person_position && `(${c.contact_person_position})`}
                         </div>
+                      )}
+
+                      {c.notes && (
+                        <div className="text-[11px] text-titanium-400 italic pt-0.5">{c.notes}</div>
                       )}
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      {c.contact_type.includes('PHONE') || c.contact_type === 'MOBILE' || c.contact_type === 'LANDLINE' ? (
+                      {c.contact_type.includes('PHONE') ||
+                      c.contact_type === 'MOBILE' ||
+                      c.contact_type === 'LANDLINE' ? (
                         <a
-                          href={`tel:${c.contact_value}`}
-                          className="p-2 bg-titanium-800 hover:bg-titanium-700 text-radar-green rounded-lg border border-titanium-700 transition-colors"
-                          title="Apelează"
+                          href={`tel:${c.normalized_value || c.contact_value}`}
+                          className="p-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 rounded-lg border border-emerald-500/30 transition-colors"
+                          title="Apelează telefonic"
                         >
                           <PhoneCall className="w-4 h-4" />
                         </a>
@@ -763,19 +837,50 @@ export default function CompanyDetailPage() {
 
                       {c.contact_type.includes('EMAIL') ? (
                         <a
-                          href={`mailto:${c.contact_value}`}
-                          className="p-2 bg-titanium-800 hover:bg-titanium-700 text-cyan-400 rounded-lg border border-titanium-700 transition-colors"
+                          href={`mailto:${c.normalized_value || c.contact_value}`}
+                          className="p-2 bg-purple-600/20 hover:bg-purple-600/30 text-purple-300 rounded-lg border border-purple-500/30 transition-colors"
                           title="Trimite Email"
                         >
                           <Mail className="w-4 h-4" />
                         </a>
                       ) : null}
+
+                      {c.contact_type === 'WEBSITE' || c.contact_type === 'CONTACT_FORM' ? (
+                        <a
+                          href={
+                            (c.normalized_value || c.contact_value).startsWith('http')
+                              ? c.normalized_value || c.contact_value
+                              : `https://${c.normalized_value || c.contact_value}`
+                          }
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="p-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 rounded-lg border border-blue-500/30 transition-colors"
+                          title="Deschide pagină"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
+                      ) : null}
                     </div>
                   </div>
 
-                  <div className="text-[10px] text-titanium-500 font-mono border-t border-titanium-850 pt-2 flex items-center justify-between">
-                    <span>Sursă: {c.source_name || 'Înregistrare Directă'}</span>
-                    <span>Încredere: {Math.round((c.confidence_score || 0.8) * 100)}%</span>
+                  <div className="text-[10px] text-titanium-500 font-mono border-t border-titanium-850 pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                    <div>
+                      Sursă: <span className="text-titanium-300">{c.source_name || 'Înregistrare Directă'}</span>
+                      {c.provenance_url && (
+                        <a
+                          href={c.provenance_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-400 hover:underline ml-1 inline-flex items-center gap-0.5"
+                        >
+                          [URL Proveniență <ExternalLink className="w-2.5 h-2.5" />]
+                        </a>
+                      )}
+                    </div>
+                    <div>
+                      Încredere: <span className="text-emerald-400">{Math.round((c.confidence_score || 0.8) * 100)}%</span>
+                      {c.discovered_at && <span className="ml-2 text-titanium-600">{c.discovered_at.slice(0, 10)}</span>}
+                    </div>
                   </div>
                 </div>
               ))}

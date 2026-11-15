@@ -1,7 +1,8 @@
 import { getDatabase } from './db';
 
 export interface AuditEvent {
-  user: string;
+  user?: string;
+  actor?: string;
   action:
     | 'EXPORT'
     | 'PIPELINE_UPDATE'
@@ -14,12 +15,13 @@ export interface AuditEvent {
     | 'OPPORTUNITY_STATUS_UPDATE'
     | 'SUPPRESSION_ADDED'
     | 'SUPPRESSION_REMOVED'
+    | 'COMPANY_ENRICHMENT_RUN'
     | 'AUTH_LOGIN'
     | 'AUTH_FAILED'
     | 'SETTINGS_CHANGE';
   resource?: string;
   details?: Record<string, any>;
-  status: 'SUCCESS' | 'DENIED' | 'FAILED' | 'ALLOWED';
+  status?: 'SUCCESS' | 'DENIED' | 'FAILED' | 'ALLOWED';
   ip?: string;
 }
 

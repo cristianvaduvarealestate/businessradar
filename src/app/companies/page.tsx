@@ -40,7 +40,10 @@ function CompaniesContent() {
     searchParams?.get('hasMobile') === 'true' ? 'hasMobile' :
     searchParams?.get('hasLandline') === 'true' ? 'hasLandline' :
     searchParams?.get('hasEmail') === 'true' ? 'hasEmail' :
-    searchParams?.get('hasWebsite') === 'true' ? 'hasWebsite' : ''
+    searchParams?.get('hasWebsite') === 'true' ? 'hasWebsite' :
+    searchParams?.get('hasAnyContact') === 'true' ? 'hasAnyContact' :
+    searchParams?.get('noContact') === 'true' ? 'noContact' :
+    searchParams?.get('needsVerification') === 'true' ? 'needsVerification' : ''
   );
 
   const fetchCompanies = async (page = 1) => {
@@ -61,6 +64,9 @@ function CompaniesContent() {
       if (contactFilter === 'hasLandline') params.set('hasLandline', 'true');
       if (contactFilter === 'hasEmail') params.set('hasEmail', 'true');
       if (contactFilter === 'hasWebsite') params.set('hasWebsite', 'true');
+      if (contactFilter === 'hasAnyContact') params.set('hasAnyContact', 'true');
+      if (contactFilter === 'noContact') params.set('noContact', 'true');
+      if (contactFilter === 'needsVerification') params.set('needsVerification', 'true');
 
       const res = await fetch(`/api/companies?${params.toString()}`);
       const data = await res.json();
@@ -174,11 +180,14 @@ function CompaniesContent() {
             className="bg-titanium-950 border border-titanium-800 text-titanium-200 px-3 py-1.5 rounded-lg text-xs focus:outline-none focus:border-radar-green"
           >
             <option value="">Toate contactele</option>
-            <option value="hasPhone">Doar cu telefoane</option>
-            <option value="hasMobile">Doar cu telefoane mobile (+407)</option>
-            <option value="hasLandline">Doar cu telefoane fixe (+402/+403)</option>
-            <option value="hasEmail">Doar cu adrese de email</option>
+            <option value="hasAnyContact">Are orice contact identificat</option>
+            <option value="hasMobile">Doar cu mobil (+407...)</option>
+            <option value="hasLandline">Doar cu telefon fix (+402/+403)</option>
+            <option value="hasPhone">Cu orice telefon</option>
+            <option value="hasEmail">Doar cu adresă de email</option>
             <option value="hasWebsite">Doar cu website oficial</option>
+            <option value="noContact">Fără date de contact încă</option>
+            <option value="needsVerification">Contacte ce necesită verificare</option>
           </select>
 
           <select
@@ -298,22 +307,40 @@ function CompaniesContent() {
                         </span>
 
                         <div className="flex items-center gap-2 text-[11px] text-titanium-400 pt-0.5">
-                          {company.website && (
-                            <span className="text-radar-green flex items-center gap-0.5" title="Website disponibil">
-                              <Globe className="w-3 h-3" />
-                            </span>
-                          )}
-                          {company.sample_phone && (
-                            <span className="text-cyan-400 flex items-center gap-0.5 font-mono" title={company.sample_phone}>
+                          {company.sample_phone ? (
+                            <a
+                              href={`tel:${company.sample_phone}`}
+                              className="text-emerald-400 hover:text-emerald-300 flex items-center gap-1 font-mono font-medium bg-emerald-950/30 px-1.5 py-0.5 rounded border border-emerald-500/20"
+                              title={`Sună ${company.sample_phone}`}
+                            >
                               <Phone className="w-3 h-3" />
                               {company.sample_phone}
-                            </span>
-                          )}
-                          {company.sample_email && (
-                            <span className="text-violet-400 flex items-center gap-0.5 font-mono" title={company.sample_email}>
+                            </a>
+                          ) : null}
+
+                          {company.sample_email ? (
+                            <a
+                              href={`mailto:${company.sample_email}`}
+                              className="text-purple-400 hover:text-purple-300 flex items-center gap-1 font-mono font-medium bg-purple-950/30 px-1.5 py-0.5 rounded border border-purple-500/20"
+                              title={`Email: ${company.sample_email}`}
+                            >
                               <Mail className="w-3 h-3" />
-                            </span>
-                          )}
+                              {company.sample_email}
+                            </a>
+                          ) : null}
+
+                          {company.website ? (
+                            <a
+                              href={company.website.startsWith('http') ? company.website : `https://${company.website}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-400 hover:text-blue-300 flex items-center gap-0.5 bg-blue-950/30 px-1.5 py-0.5 rounded border border-blue-500/20"
+                              title={`Website: ${company.website}`}
+                            >
+                              <Globe className="w-3 h-3" />
+                            </a>
+                          ) : null}
+
                           {!company.website && !company.sample_phone && !company.sample_email && (
                             <span className="text-titanium-600 text-[10px] italic">Fără contact</span>
                           )}
