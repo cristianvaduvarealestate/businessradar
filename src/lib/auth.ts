@@ -58,6 +58,7 @@ export function getInternalSecurityKey(): string {
 /**
  * Retrieves the dedicated administrator web login passkey from environment variables or Cloudflare context.
  * RADAR_ADMIN_PASSKEY is strictly the ONLY credential accepted for administrator login.
+ * Separates administrator passkey from internal cryptographic signing key (RADAR_SECURITY_KEY).
  * Fallback to RADAR_SECURITY_KEY or ADMIN_PASSKEY is completely removed.
  * Returns empty string if unconfigured. Never uses hardcoded defaults.
  */
