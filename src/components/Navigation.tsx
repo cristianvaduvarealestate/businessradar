@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Compass,
   Building2,
@@ -11,10 +11,9 @@ import {
   Server,
   HeartPulse,
   Settings,
-  Search,
-  Sparkles,
   BarChart3,
-  ExternalLink,
+  LogOut,
+  ShieldAlert,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
@@ -31,6 +30,22 @@ const NAV_ITEMS = [
 
 export default function Navigation() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  // Hide navigation on login page
+  if (pathname === '/login') {
+    return null;
+  }
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      router.push('/login');
+      router.refresh();
+    } catch {
+      router.push('/login');
+    }
+  };
 
   return (
     <aside className="w-64 bg-titanium-900 border-r border-titanium-800 flex flex-col shrink-0 min-h-screen">
@@ -49,14 +64,14 @@ export default function Navigation() {
           </div>
         </Link>
         <div className="mt-2 text-[11px] text-titanium-400 font-mono">
-          radar.cristianvaduva.com
+          businessradar.cristianvaduva.com
         </div>
       </div>
 
       {/* Main Nav Links */}
       <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
         <div className="px-3 py-2 text-[10px] font-bold text-titanium-500 uppercase tracking-wider">
-          Intelligence & Prospectare
+          Intelligence &amp; Prospectare
         </div>
 
         {NAV_ITEMS.map((item) => {
@@ -87,18 +102,35 @@ export default function Navigation() {
         })}
       </nav>
 
-      {/* System Status Footer */}
-      <div className="p-4 border-t border-titanium-800 bg-titanium-950/40 text-[11px]">
-        <div className="flex items-center justify-between text-titanium-400 mb-1.5">
+      {/* Security & System Footer */}
+      <div className="p-4 border-t border-titanium-800 bg-titanium-950/40 text-[11px] space-y-2.5">
+        <div className="flex items-center justify-between text-titanium-400">
           <span className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-radar-green"></span>
             Motor Ingestie
           </span>
           <span className="font-mono text-titanium-300">AUTO</span>
         </div>
-        <div className="text-[10px] text-titanium-500 flex justify-between">
-          <span>Sincronizare ONRC</span>
-          <span className="text-titanium-400 font-mono">Activ</span>
+
+        <div className="flex items-center justify-between text-[10px] text-titanium-500">
+          <span>Securitate</span>
+          <span className="text-radar-green font-mono flex items-center gap-1">
+            <ShieldAlert className="w-3 h-3" /> Zero Trust
+          </span>
+        </div>
+
+        <div className="pt-2 border-t border-titanium-850/60 flex items-center justify-between">
+          <div className="text-[10px] text-titanium-400 font-mono truncate max-w-[140px]">
+            admin
+          </div>
+          <button
+            onClick={handleLogout}
+            title="Deconectare securizată"
+            className="text-[11px] text-titanium-400 hover:text-rose-400 transition-colors flex items-center gap-1"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Ieșire</span>
+          </button>
         </div>
       </div>
     </aside>

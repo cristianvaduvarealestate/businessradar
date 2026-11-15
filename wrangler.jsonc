@@ -6,6 +6,11 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "workers_dev": false,
+  "vars": {
+    "AUTHORIZED_ADMIN_EMAILS": "myremaxclubcristianv@gmail.com",
+    "CANONICAL_HOSTNAME": "businessradar.cristianvaduva.com"
+  },
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"

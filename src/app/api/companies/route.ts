@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/db';
 import { getCategoriesForCaen, INDUSTRY_CATEGORIES } from '@/lib/caen';
+import { validateRequest } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  // Defense-in-depth auth check
+  const auth = validateRequest(request);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { success: false, error: 'Unauthorized', message: 'Autentificare necesară.' },
+      { status: 401, headers: { 'Cache-Control': 'private, no-cache, no-store, max-age=0, must-revalidate' } }
+    );
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const db = getDatabase();
@@ -26,95 +36,113 @@ export async function GET(request: NextRequest) {
     const whereClauses: string[] = [];
     const params: any[] = [];
 
+    // FTS or Substring Search
     if (query) {
       if (/^\d+$/.test(query)) {
-        whereClauses.push('c.cui = ?');
-        params.push(parseInt(query, 10));
+        whereClauses.push('(cui = ? OR cui LIKE ?)');
+        params.push(parseInt(query, 10), `${query}%`);
       } else {
-        whereClauses.push('(c.name LIKE ? OR c.reg_com LIKE ? OR c.city LIKE ?)');
-        const wild = `%${query}%`;
-        params.push(wild, wild, wild);
+        whereClauses.push('(name LIKE ? OR normalized_name LIKE ? OR caen_description LIKE ? OR reg_com LIKE ?)');
+        const searchPattern = `%${query}%`;
+        params.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
     }
 
     if (county) {
-      whereClauses.push('c.county = ?');
+      whereClauses.push('county = ?');
       params.push(county);
     }
 
     if (city) {
-      whereClauses.push('c.city LIKE ?');
+      whereClauses.push('city LIKE ?');
       params.push(`%${city}%`);
     }
 
     if (caen) {
-      whereClauses.push('c.primary_caen LIKE ?');
-      params.push(`${caen}%`);
-    }
-
-    if (category && INDUSTRY_CATEGORIES[category]) {
-      const cat = INDUSTRY_CATEGORIES[category];
-      const orPrefixes = cat.caenPrefixes.map(() => 'c.primary_caen LIKE ?').join(' OR ');
-      whereClauses.push(`(${orPrefixes})`);
-      for (const p of cat.caenPrefixes) {
-        params.push(`${p}%`);
-      }
+      whereClauses.push('primary_caen = ?');
+      params.push(caen);
     }
 
     if (priority) {
-      whereClauses.push('c.prospect_priority = ?');
+      whereClauses.push('prospect_priority = ?');
       params.push(priority);
     }
 
     if (status) {
-      whereClauses.push('c.status = ?');
+      whereClauses.push('status = ?');
       params.push(status);
     }
 
     if (hasWebsite === 'true') {
-      whereClauses.push("c.website IS NOT NULL AND c.website != ''");
+      whereClauses.push("website IS NOT NULL AND website != ''");
     }
 
     if (isNew === 'true') {
-      whereClauses.push("datetime(c.first_observed_at, '+90 days') >= datetime('now')");
+      whereClauses.push("datetime(first_observed_at, '+90 days') >= datetime('now')");
+    }
+
+    // Category filtering
+    if (category && INDUSTRY_CATEGORIES[category]) {
+      const prefixes = INDUSTRY_CATEGORIES[category].caenPrefixes;
+      if (prefixes.length > 0) {
+        const caenOrs = prefixes.map(() => 'primary_caen LIKE ?').join(' OR ');
+        whereClauses.push(`(${caenOrs})`);
+        prefixes.forEach((p) => params.push(`${p}%`));
+      }
     }
 
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
     // Total Count
-    const countSql = `SELECT COUNT(*) as total FROM companies c ${whereSql}`;
+    const countSql = `SELECT COUNT(*) as total FROM companies ${whereSql}`;
     const totalCount = (db.prepare(countSql).get(...params) as any).total;
 
-    // Paginated Items
+    // Sorting
+    const sortField = searchParams.get('sort') || 'opportunity_score';
+    const sortOrder = searchParams.get('order')?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+    const allowedSortFields = ['opportunity_score', 'first_observed_at', 'name', 'turnover', 'employees_avg'];
+    const safeSort = allowedSortFields.includes(sortField) ? sortField : 'opportunity_score';
+
+    // Query Data
     const querySql = `
       SELECT 
-        c.id, c.cui, c.name, c.reg_com, c.legal_form, c.incorporation_date,
-        c.county, c.city, c.primary_caen, c.caen_description, c.status,
-        c.website, c.opportunity_score, c.data_completeness_score, c.prospect_priority,
-        c.first_observed_at,
-        (SELECT COUNT(*) FROM insurance_opportunities io WHERE io.cui = c.cui) as opp_count,
-        (SELECT COUNT(*) FROM contact_records cr WHERE cr.cui = c.cui) as contact_count,
-        (SELECT p.status FROM prospect_pipeline p WHERE p.cui = c.cui) as pipeline_status
-      FROM companies c
+        id, cui, name, normalized_name, reg_com, legal_form, incorporation_date,
+        country, county, city, primary_caen, caen_description, status,
+        website, first_observed_at, last_observed_at, data_completeness_score,
+        opportunity_score, financial_trend, prospect_priority
+      FROM companies
       ${whereSql}
-      ORDER BY c.opportunity_score DESC, c.first_observed_at DESC
+      ORDER BY ${safeSort} ${sortOrder}
       LIMIT ? OFFSET ?
     `;
 
     const items = db.prepare(querySql).all(...params, limit, offset);
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        items,
-        pagination: {
-          page,
-          limit,
-          total: totalCount,
-          totalPages: Math.ceil(totalCount / limit),
-        }
+    // Enrich with categories
+    const enrichedItems = items.map((c: any) => ({
+      ...c,
+      categories: getCategoriesForCaen(c.primary_caen),
+    }));
+
+    return NextResponse.json(
+      {
+        success: true,
+        data: {
+          items: enrichedItems,
+          pagination: {
+            page,
+            limit,
+            totalItems: totalCount,
+            totalPages: Math.ceil(totalCount / limit),
+          },
+        },
+      },
+      {
+        headers: {
+          'Cache-Control': 'private, no-cache, no-store, max-age=0, must-revalidate',
+        },
       }
-    });
+    );
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

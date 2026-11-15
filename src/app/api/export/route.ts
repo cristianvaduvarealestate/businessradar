@@ -1,9 +1,73 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/db';
+import { validateRequest } from '@/lib/auth';
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit';
+import { logAuditEvent } from '@/lib/audit';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const ip = getClientIp(request.headers);
+
+  // 1. Authenticate request
+  const auth = validateRequest(request);
+  if (!auth.authenticated) {
+    logAuditEvent({
+      user: 'anonymous',
+      action: 'EXPORT',
+      details: { reason: 'unauthorized_attempt', ip },
+      status: 'DENIED',
+      ip,
+    });
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Unauthorized',
+        message: 'Autentificare necesară pentru exportul de date.',
+        status: 401,
+      },
+      {
+        status: 401,
+        headers: {
+          'Cache-Control': 'private, no-cache, no-store, max-age=0, must-revalidate',
+        },
+      }
+    );
+  }
+
+  // 2. Strict Rate Limiting: max 5 exports per 15 minutes
+  const rateLimit = checkRateLimit({
+    windowMs: 15 * 60 * 1000,
+    maxRequests: 5,
+    identifier: `export:${ip}:${auth.user}`,
+  });
+
+  if (!rateLimit.allowed) {
+    logAuditEvent({
+      user: auth.user || 'admin',
+      action: 'EXPORT',
+      details: { reason: 'rate_limited', ip },
+      status: 'DENIED',
+      ip,
+    });
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Prea multe solicitări de export. Limita este de 5 exporturi la 15 minute.',
+        status: 429,
+      },
+      {
+        status: 429,
+        headers: {
+          'Retry-After': String(rateLimit.retryAfterSeconds || 900),
+          'Cache-Control': 'private, no-cache, no-store, max-age=0, must-revalidate',
+        },
+      }
+    );
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const db = getDatabase();
@@ -41,7 +105,11 @@ export async function GET(request: NextRequest) {
     `).all(...params) as any[];
 
     // CSV format with UTF-8 BOM for Excel compatibility
-    const header = ['CUI', 'Denumire', 'Nr_RegCom', 'Forma_Juridica', 'Data_Inmatriculare', 'Judet', 'Localitate', 'Strada', 'CAEN', 'Descriere_CAEN', 'Stare', 'Website', 'Scor_Oportunitate', 'Completitudine', 'Prioritate'];
+    const header = [
+      'CUI', 'Denumire', 'Nr_RegCom', 'Forma_Juridica', 'Data_Inmatriculare',
+      'Judet', 'Localitate', 'Strada', 'CAEN', 'Descriere_CAEN', 'Stare',
+      'Website', 'Scor_Oportunitate', 'Completitudine', 'Prioritate'
+    ];
     
     const escapeCsv = (val: any) => {
       if (val === null || val === undefined) return '""';
@@ -71,13 +139,38 @@ export async function GET(request: NextRequest) {
       csvContent += line + '\n';
     }
 
+    // 3. Log audit event
+    logAuditEvent({
+      user: auth.user || 'admin',
+      action: 'EXPORT',
+      details: {
+        format: 'csv',
+        recordCount: rows.length,
+        filterPriority: priority,
+        filterCounty: county,
+        filterIsNew: isNew,
+      },
+      status: 'SUCCESS',
+      ip,
+    });
+
     return new Response(csvContent, {
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
         'Content-Disposition': `attachment; filename="radar_business_export_${Date.now()}.csv"`,
+        'Cache-Control': 'private, no-cache, no-store, max-age=0, must-revalidate',
+        'X-Robots-Tag': 'noindex, nofollow, noarchive, nosnippet',
       },
     });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: error.message },
+      {
+        status: 500,
+        headers: {
+          'Cache-Control': 'private, no-cache, no-store, max-age=0, must-revalidate',
+        },
+      }
+    );
   }
 }

@@ -1,9 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase } from '@/lib/db';
+import { validateRequest } from '@/lib/auth';
+import { logAuditEvent } from '@/lib/audit';
+import { getClientIp } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const auth = validateRequest(request);
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { success: false, error: 'Unauthorized', message: 'Autentificare necesară.' },
+      { status: 401, headers: { 'Cache-Control': 'private, no-cache, no-store, max-age=0, must-revalidate' } }
+    );
+  }
+
   try {
     const db = getDatabase();
 
@@ -26,19 +37,36 @@ export async function GET() {
       GROUP BY status
     `).all();
 
-    return NextResponse.json({
-      success: true,
-      data: {
-        items: pipelineItems,
-        statusCounts,
+    return NextResponse.json(
+      {
+        success: true,
+        data: {
+          items: pipelineItems,
+          statusCounts,
+        },
+      },
+      {
+        headers: {
+          'Cache-Control': 'private, no-cache, no-store, max-age=0, must-revalidate',
+        },
       }
-    });
+    );
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
+  const ip = getClientIp(request.headers);
+  const auth = validateRequest(request);
+
+  if (!auth.authenticated) {
+    return NextResponse.json(
+      { success: false, error: 'Unauthorized', message: 'Autentificare necesară.' },
+      { status: 401 }
+    );
+  }
+
   try {
     const body = await request.json();
     const { cui, status, priority, notes, next_follow_up_date, products_discussed, quotation_amount } = body;
@@ -71,7 +99,19 @@ export async function POST(request: NextRequest) {
       quotation_amount || null
     );
 
-    return NextResponse.json({ success: true, message: 'Status actualizat cu succes în pipeline' });
+    logAuditEvent({
+      user: auth.user || 'admin',
+      action: 'PIPELINE_UPDATE',
+      resource: String(cui),
+      details: { status, priority },
+      status: 'SUCCESS',
+      ip,
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: 'Status actualizat cu succes în pipeline',
+    });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
