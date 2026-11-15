@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
       logAuditEvent({
         user: email || 'unknown',
         action: 'AUTH_FAILED',
-        details: { reason: 'passkey_unconfigured_on_server', ip },
+        details: { reason: 'passkey_unconfigured_or_too_short_on_server', ip },
         status: 'DENIED',
         ip,
       });
@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           success: false,
-          error: 'Autentificarea administrativă nu este încă configurată pe server (setați secretul RADAR_ADMIN_PASSKEY).',
+          error: 'Autentificarea administrativă nu este încă configurată pe server sau parola este prea scurtă (minim 12 caractere pentru RADAR_ADMIN_PASSKEY).',
         },
         { status: 503 }
       );
