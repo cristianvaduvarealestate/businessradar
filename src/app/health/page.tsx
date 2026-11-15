@@ -109,15 +109,15 @@ export default function SystemHealthPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-mono">
           <div className="p-3 bg-titanium-950 rounded-lg border border-titanium-800">
             <div className="text-titanium-500 text-[11px]">Companii Master</div>
-            <div className="text-base font-bold text-titanium-100 mt-1">{totalCompanies.toLocaleString('ro-RO')}</div>
+            <div className="text-base font-bold text-titanium-100 mt-1">{(totalCompanies || 0).toLocaleString('ro-RO')}</div>
           </div>
           <div className="p-3 bg-titanium-950 rounded-lg border border-titanium-800">
             <div className="text-titanium-500 text-[11px]">Oportunități Generate</div>
-            <div className="text-base font-bold text-radar-green mt-1">{totalOpportunities.toLocaleString('ro-RO')}</div>
+            <div className="text-base font-bold text-radar-green mt-1">{(totalOpportunities || 0).toLocaleString('ro-RO')}</div>
           </div>
           <div className="p-3 bg-titanium-950 rounded-lg border border-titanium-800">
             <div className="text-titanium-500 text-[11px]">Contacte Înregistrate</div>
-            <div className="text-base font-bold text-cyan-400 mt-1">{totalContacts.toLocaleString('ro-RO')}</div>
+            <div className="text-base font-bold text-cyan-400 mt-1">{(totalContacts || 0).toLocaleString('ro-RO')}</div>
           </div>
           <div className="p-3 bg-titanium-950 rounded-lg border border-titanium-800">
             <div className="text-titanium-500 text-[11px]">Mod Jurnalizare</div>

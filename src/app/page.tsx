@@ -99,11 +99,11 @@ export default function DashboardPage() {
             <Building2 className="w-4 h-4 text-titanium-500" />
           </div>
           <div className="text-2xl font-bold text-titanium-100 font-mono">
-            {totalCompanies.toLocaleString('ro-RO')}
+            {(totalCompanies || 0).toLocaleString('ro-RO')}
           </div>
           <div className="text-[11px] text-titanium-500 mt-1 flex items-center gap-1">
             <CheckCircle2 className="w-3.5 h-3.5 text-radar-green" />
-            {activeCompanies.toLocaleString('ro-RO')} în funcțiune
+            {(activeCompanies || 0).toLocaleString('ro-RO')} în funcțiune
           </div>
         </div>
 
@@ -113,10 +113,10 @@ export default function DashboardPage() {
             <Compass className="w-4 h-4 text-radar-green" />
           </div>
           <div className="text-2xl font-bold text-radar-green font-mono">
-            {newLast90Days.toLocaleString('ro-RO')}
+            {(newLast90Days || 0).toLocaleString('ro-RO')}
           </div>
           <div className="text-[11px] text-titanium-400 mt-1">
-            +{newToday} identificate astăzi
+            +{(newToday || 0).toLocaleString('ro-RO')} identificate astăzi
           </div>
         </div>
 
@@ -126,7 +126,7 @@ export default function DashboardPage() {
             <ShieldCheck className="w-4 h-4 text-cyan-400" />
           </div>
           <div className="text-2xl font-bold text-cyan-400 font-mono">
-            {withOpportunities.toLocaleString('ro-RO')}
+            {(withOpportunities || 0).toLocaleString('ro-RO')}
           </div>
           <div className="text-[11px] text-titanium-400 mt-1">
             Polițe recomandate determinist
@@ -139,7 +139,7 @@ export default function DashboardPage() {
             <TrendingUp className="w-4 h-4 text-amber-400" />
           </div>
           <div className="text-2xl font-bold text-amber-400 font-mono">
-            {highPriority.toLocaleString('ro-RO')}
+            {(highPriority || 0).toLocaleString('ro-RO')}
           </div>
           <div className="text-[11px] text-titanium-400 mt-1">
             Scor oportunitate &gt;= 70%

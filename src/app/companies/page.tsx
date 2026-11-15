@@ -40,9 +40,15 @@ export default function CompaniesPage() {
 
       const res = await fetch(`/api/companies?${params.toString()}`);
       const data = await res.json();
-      if (data.success) {
-        setItems(data.data.items);
-        setPagination(data.data.pagination);
+      if (data.success && data.data) {
+        setItems(data.data.items || []);
+        const pag = data.data.pagination || {};
+        setPagination({
+          page: pag.page || 1,
+          limit: pag.limit || 25,
+          total: typeof pag.total === 'number' ? pag.total : (pag.totalItems || 0),
+          totalPages: pag.totalPages || 1,
+        });
       }
     } catch (err) {
       console.error(err);
@@ -79,7 +85,7 @@ export default function CompaniesPage() {
             Explorator Companii Românești
           </h1>
           <p className="text-xs text-titanium-400 mt-1">
-            Total {pagination.total.toLocaleString('ro-RO')} entități economice verificate în registru.
+            Total {(pagination?.total ?? 0).toLocaleString('ro-RO')} entități economice verificate în registru.
           </p>
         </div>
 
@@ -271,7 +277,7 @@ export default function CompaniesPage() {
         <div className="p-4 border-t border-titanium-800 bg-titanium-950/40 flex items-center justify-between text-xs text-titanium-400">
           <div>
             Afișate {(pagination.page - 1) * pagination.limit + 1} -{' '}
-            {Math.min(pagination.page * pagination.limit, pagination.total)} din {pagination.total} companii
+            {Math.min(pagination.page * pagination.limit, pagination?.total ?? 0)} din {pagination?.total ?? 0} companii
           </div>
 
           <div className="flex items-center gap-2">

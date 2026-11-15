@@ -35,9 +35,15 @@ export default function NewCompaniesRadarPage() {
 
       const res = await fetch(`/api/companies?${params.toString()}`);
       const data = await res.json();
-      if (data.success) {
-        setItems(data.data.items);
-        setPagination(data.data.pagination);
+      if (data.success && data.data) {
+        setItems(data.data.items || []);
+        const pag = data.data.pagination || {};
+        setPagination({
+          page: pag.page || 1,
+          limit: pag.limit || 25,
+          total: typeof pag.total === 'number' ? pag.total : (pag.totalItems || 0),
+          totalPages: pag.totalPages || 1,
+        });
       }
     } catch (err) {
       console.error(err);
@@ -63,7 +69,7 @@ export default function NewCompaniesRadarPage() {
             Radar Firme Noi (Ultimele 90 de Zile)
           </h1>
           <p className="text-xs text-titanium-400 mt-1">
-            {pagination.total.toLocaleString('ro-RO')} firme nou-înființate sau nou-observate în România — momentul optim pentru contractarea polițelor de start-up.
+            {(pagination?.total ?? 0).toLocaleString('ro-RO')} firme nou-înființate sau nou-observate în România — momentul optim pentru contractarea polițelor de start-up.
           </p>
         </div>
 
@@ -179,7 +185,7 @@ export default function NewCompaniesRadarPage() {
 
       {/* Pagination */}
       <div className="p-4 bg-titanium-900 border border-titanium-800 rounded-xl flex items-center justify-between text-xs text-titanium-400">
-        <div>Total {pagination.total} firme în radarul recent</div>
+        <div>Total {pagination?.total ?? 0} firme în radarul recent</div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => fetchRadarCompanies(pagination.page - 1)}

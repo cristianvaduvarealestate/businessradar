@@ -35,9 +35,9 @@ export default function PipelinePage() {
     try {
       const res = await fetch('/api/pipeline');
       const data = await res.json();
-      if (data.success) {
-        setItems(data.data.items);
-        setStatusCounts(data.data.statusCounts);
+      if (data.success && data.data) {
+        setItems(data.data.items || []);
+        setStatusCounts(data.data.statusCounts || []);
       }
     } catch (err) {
       console.error(err);
