@@ -15,10 +15,12 @@ import {
   LogOut,
   ShieldAlert,
   Sparkles,
+  PhoneCall,
 } from 'lucide-react';
 
 const NAV_ITEMS = [
   { href: '/', label: 'Overview', icon: BarChart3 },
+  { href: '/calling', label: 'Workspace Apeluri', icon: PhoneCall, badge: 'HOT', highlight: true },
   { href: '/radar', label: 'Radar Firme Noi', icon: Compass, badge: 'LIVE' },
   { href: '/companies', label: 'Baza Națională', icon: Building2 },
   { href: '/enrichment', label: 'Motor Contacte B2B', icon: Sparkles, badge: 'AUTO' },

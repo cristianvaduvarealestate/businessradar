@@ -34,6 +34,9 @@ export async function GET(request: NextRequest) {
     const noContact = searchParams.get('noContact');
     const needsVerification = searchParams.get('needsVerification');
     const isNew = searchParams.get('isNew'); // 'true' for 90 days radar
+    const source = searchParams.get('source')?.trim() || '';
+    const opportunity = searchParams.get('opportunity')?.trim() || '';
+    const requiresCallback = searchParams.get('requiresCallback');
 
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(10, parseInt(searchParams.get('limit') || '25', 10)));
@@ -116,6 +119,23 @@ export async function GET(request: NextRequest) {
       whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND cr.verification_status IN ('UNVERIFIED', 'FORMAT_VALID_ONLY', 'PUBLIC_UNVERIFIED'))");
     }
 
+    if (source === 'ANAF') {
+      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND cr.source_name = 'ANAF_OPEN_DATA')");
+    } else if (source === 'WEBSITE') {
+      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND cr.source_name = 'OFFICIAL_WEBSITE')");
+    } else if (source === 'MANUAL') {
+      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND cr.verification_status = 'MANUALLY_CONFIRMED')");
+    }
+
+    if (opportunity) {
+      whereClauses.push("EXISTS (SELECT 1 FROM insurance_opportunities io WHERE io.cui = companies.cui AND io.product_category = ?)");
+      params.push(opportunity);
+    }
+
+    if (requiresCallback === 'true') {
+      whereClauses.push("EXISTS (SELECT 1 FROM crm_follow_ups cf WHERE cf.cui = companies.cui AND cf.status = 'PENDING')");
+    }
+
     if (isNew === 'true') {
       whereClauses.push("datetime(first_observed_at, '+90 days') >= datetime('now')");
     }
@@ -157,8 +177,22 @@ export async function GET(request: NextRequest) {
         (SELECT COUNT(*) FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'LANDLINE' OR cr.contact_value LIKE '+402%' OR cr.contact_value LIKE '02%' OR cr.contact_value LIKE '+403%' OR cr.contact_value LIKE '03%')) as has_landline,
         (SELECT COUNT(*) FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%EMAIL%') as has_email,
         (SELECT CASE WHEN companies.website IS NOT NULL AND companies.website != '' THEN 1 ELSE 0 END) as has_website,
+        (SELECT COALESCE(cr.normalized_value, cr.contact_value) FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'MOBILE' OR cr.contact_value LIKE '+407%' OR cr.contact_value LIKE '07%') ORDER BY cr.confidence_score DESC LIMIT 1) as mobile_phone,
+        (SELECT cr.source_name FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'MOBILE' OR cr.contact_value LIKE '+407%' OR cr.contact_value LIKE '07%') ORDER BY cr.confidence_score DESC LIMIT 1) as mobile_source,
+        (SELECT cr.verification_status FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'MOBILE' OR cr.contact_value LIKE '+407%' OR cr.contact_value LIKE '07%') ORDER BY cr.confidence_score DESC LIMIT 1) as mobile_status,
+        (SELECT cr.confidence_score FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'MOBILE' OR cr.contact_value LIKE '+407%' OR cr.contact_value LIKE '07%') ORDER BY cr.confidence_score DESC LIMIT 1) as mobile_score,
+        (SELECT COALESCE(cr.normalized_value, cr.contact_value) FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'LANDLINE' OR cr.contact_value LIKE '+402%' OR cr.contact_value LIKE '02%' OR cr.contact_value LIKE '+403%' OR cr.contact_value LIKE '03%') ORDER BY cr.confidence_score DESC LIMIT 1) as landline_phone,
+        (SELECT cr.source_name FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'LANDLINE' OR cr.contact_value LIKE '+402%' OR cr.contact_value LIKE '02%' OR cr.contact_value LIKE '+403%' OR cr.contact_value LIKE '03%') ORDER BY cr.confidence_score DESC LIMIT 1) as landline_source,
+        (SELECT cr.verification_status FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'LANDLINE' OR cr.contact_value LIKE '+402%' OR cr.contact_value LIKE '02%' OR cr.contact_value LIKE '+403%' OR cr.contact_value LIKE '03%') ORDER BY cr.confidence_score DESC LIMIT 1) as landline_status,
+        (SELECT cr.confidence_score FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'LANDLINE' OR cr.contact_value LIKE '+402%' OR cr.contact_value LIKE '02%' OR cr.contact_value LIKE '+403%' OR cr.contact_value LIKE '03%') ORDER BY cr.confidence_score DESC LIMIT 1) as landline_score,
+        (SELECT COALESCE(cr.normalized_value, cr.contact_value) FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%EMAIL%' ORDER BY cr.confidence_score DESC LIMIT 1) as email_contact,
+        (SELECT cr.source_name FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%EMAIL%' ORDER BY cr.confidence_score DESC LIMIT 1) as email_source,
+        (SELECT cr.verification_status FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%EMAIL%' ORDER BY cr.confidence_score DESC LIMIT 1) as email_status,
         (SELECT COALESCE(cr.normalized_value, cr.contact_value) FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'MOBILE' OR cr.contact_type = 'LANDLINE' OR cr.contact_type LIKE '%PHONE%') ORDER BY cr.confidence_score DESC LIMIT 1) as sample_phone,
-        (SELECT COALESCE(cr.normalized_value, cr.contact_value) FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%EMAIL%' ORDER BY cr.confidence_score DESC LIMIT 1) as sample_email
+        (SELECT COALESCE(cr.normalized_value, cr.contact_value) FROM contact_records cr WHERE cr.cui = companies.cui AND cr.contact_type LIKE '%EMAIL%' ORDER BY cr.confidence_score DESC LIMIT 1) as sample_email,
+        (SELECT GROUP_CONCAT(product_name, ' | ') FROM insurance_opportunities io WHERE io.cui = companies.cui) as insurance_topics,
+        (SELECT outcome FROM crm_interactions ci WHERE ci.cui = companies.cui ORDER BY created_at DESC LIMIT 1) as last_interaction_outcome,
+        (SELECT created_at FROM crm_interactions ci WHERE ci.cui = companies.cui ORDER BY created_at DESC LIMIT 1) as last_interaction_at
       FROM companies
       ${whereSql}
       ORDER BY ${safeSort} ${sortOrder}

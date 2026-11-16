@@ -75,6 +75,9 @@ export async function GET(request: NextRequest) {
     const contactFilter = searchParams.get('contactFilter'); // 'with_mobile' | 'with_landline' | 'with_email' | 'with_website' | 'with_any_contact' | 'no_contacts'
     const priority = searchParams.get('priority');
     const county = searchParams.get('county');
+    const caen = searchParams.get('caen');
+    const opportunity = searchParams.get('opportunity');
+    const requiresCallback = searchParams.get('requiresCallback');
 
     const escapeCsv = (val: any) => {
       if (val === null || val === undefined) return '""';
@@ -156,6 +159,17 @@ export async function GET(request: NextRequest) {
       whereClauses.push('county = ?');
       params.push(county);
     }
+    if (caen) {
+      whereClauses.push('primary_caen LIKE ?');
+      params.push(`${caen}%`);
+    }
+    if (opportunity) {
+      whereClauses.push('EXISTS (SELECT 1 FROM insurance_opportunities io WHERE io.cui = companies.cui AND io.product_category = ?)');
+      params.push(opportunity);
+    }
+    if (requiresCallback === 'true') {
+      whereClauses.push("EXISTS (SELECT 1 FROM crm_follow_ups cf WHERE cf.cui = companies.cui AND cf.status = 'PENDING')");
+    }
 
     if (contactFilter === 'with_mobile') {
       whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND (cr.contact_type = 'MOBILE' OR cr.contact_value LIKE '+407%' OR cr.contact_value LIKE '07%'))");
@@ -178,9 +192,17 @@ export async function GET(request: NextRequest) {
         cui, name, reg_com, legal_form, incorporation_date, county, city,
         primary_caen, caen_description, status, website, opportunity_score,
         prospect_priority,
-        (SELECT COALESCE(normalized_value, contact_value) FROM contact_records WHERE cui = companies.cui AND (contact_type = 'MOBILE' OR contact_type LIKE '%PHONE%') ORDER BY confidence_score DESC LIMIT 1) as phone_contact,
+        (SELECT COALESCE(normalized_value, contact_value) FROM contact_records WHERE cui = companies.cui AND (contact_type = 'MOBILE' OR contact_value LIKE '+407%' OR contact_value LIKE '07%') ORDER BY confidence_score DESC LIMIT 1) as mobile_contact,
+        (SELECT source_name FROM contact_records WHERE cui = companies.cui AND (contact_type = 'MOBILE' OR contact_value LIKE '+407%' OR contact_value LIKE '07%') ORDER BY confidence_score DESC LIMIT 1) as mobile_source,
+        (SELECT verification_status FROM contact_records WHERE cui = companies.cui AND (contact_type = 'MOBILE' OR contact_value LIKE '+407%' OR contact_value LIKE '07%') ORDER BY confidence_score DESC LIMIT 1) as mobile_status,
+        (SELECT COALESCE(normalized_value, contact_value) FROM contact_records WHERE cui = companies.cui AND (contact_type = 'LANDLINE' OR contact_value LIKE '+402%' OR contact_value LIKE '02%' OR contact_value LIKE '+403%' OR contact_value LIKE '03%') ORDER BY confidence_score DESC LIMIT 1) as landline_contact,
+        (SELECT source_name FROM contact_records WHERE cui = companies.cui AND (contact_type = 'LANDLINE' OR contact_value LIKE '+402%' OR contact_value LIKE '02%' OR contact_value LIKE '+403%' OR contact_value LIKE '03%') ORDER BY confidence_score DESC LIMIT 1) as landline_source,
+        (SELECT verification_status FROM contact_records WHERE cui = companies.cui AND (contact_type = 'LANDLINE' OR contact_value LIKE '+402%' OR contact_value LIKE '02%' OR contact_value LIKE '+403%' OR contact_value LIKE '03%') ORDER BY confidence_score DESC LIMIT 1) as landline_status,
         (SELECT COALESCE(normalized_value, contact_value) FROM contact_records WHERE cui = companies.cui AND contact_type = 'EMAIL' ORDER BY confidence_score DESC LIMIT 1) as email_contact,
-        (SELECT status FROM prospect_pipeline WHERE cui = companies.cui) as pipeline_stage
+        (SELECT status FROM prospect_pipeline WHERE cui = companies.cui) as pipeline_stage,
+        (SELECT next_follow_up_date FROM prospect_pipeline WHERE cui = companies.cui) as next_follow_up,
+        (SELECT GROUP_CONCAT(product_name, ' | ') FROM insurance_opportunities io WHERE io.cui = companies.cui) as insurance_opportunities_topics,
+        (SELECT outcome FROM crm_interactions ci WHERE ci.cui = companies.cui ORDER BY created_at DESC LIMIT 1) as last_call_outcome
       FROM companies
       ${whereSql}
       ORDER BY opportunity_score DESC
@@ -190,7 +212,10 @@ export async function GET(request: NextRequest) {
     const header = [
       'CUI', 'Denumire', 'Nr_RegCom', 'Forma_Juridica', 'Data_Inmatriculare',
       'Judet', 'Localitate', 'CAEN', 'Descriere_CAEN', 'Stare',
-      'Website', 'Telefon_Principal', 'Email_Principal', 'Stadiu_Pipeline', 'Scor_Oportunitate', 'Prioritate'
+      'Website', 'Mobil', 'Sursa_Mobil', 'Status_Verificare_Mobil',
+      'Fix', 'Sursa_Fix', 'Status_Verificare_Fix', 'Email',
+      'Stadiu_Pipeline', 'Data_Follow_Up', 'Oportunitati_Asigurare_Discutie', 'Ultimul_Rezultat_Apel',
+      'Scor_Oportunitate', 'Prioritate'
     ];
 
     let csvContent = '\uFEFF' + header.join(',') + '\n';
@@ -207,9 +232,17 @@ export async function GET(request: NextRequest) {
         escapeCsv(r.caen_description),
         escapeCsv(r.status),
         escapeCsv(r.website),
-        escapeCsv(r.phone_contact),
+        escapeCsv(r.mobile_contact),
+        escapeCsv(r.mobile_source),
+        escapeCsv(r.mobile_status),
+        escapeCsv(r.landline_contact),
+        escapeCsv(r.landline_source),
+        escapeCsv(r.landline_status),
         escapeCsv(r.email_contact),
         escapeCsv(r.pipeline_stage),
+        escapeCsv(r.next_follow_up),
+        escapeCsv(r.insurance_opportunities_topics),
+        escapeCsv(r.last_call_outcome),
         r.opportunity_score,
         escapeCsv(r.prospect_priority),
       ].join(',') + '\n';

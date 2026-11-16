@@ -28,17 +28,46 @@ export async function GET(request: NextRequest) {
       FROM companies
     `)) || {};
 
-    // 2. Contact Verification Coverage
+    // 2. Contact Verification Coverage (Canonical Reconciled SQL)
     const contactStats = (await queryOne(`
       SELECT 
         COUNT(DISTINCT cui) as companies_with_any_contact,
-        COUNT(DISTINCT CASE WHEN contact_type LIKE '%PHONE%' THEN cui END) as with_phones,
-        COUNT(DISTINCT CASE WHEN contact_type = 'MOBILE' OR (contact_type LIKE '%PHONE%' AND (contact_value LIKE '+407%' OR contact_value LIKE '07%')) THEN cui END) as with_mobile,
-        COUNT(DISTINCT CASE WHEN contact_type = 'LANDLINE' OR (contact_type LIKE '%PHONE%' AND (contact_value LIKE '+402%' OR contact_value LIKE '02%' OR contact_value LIKE '+403%' OR contact_value LIKE '03%')) THEN cui END) as with_landline,
-        COUNT(DISTINCT CASE WHEN contact_type LIKE '%EMAIL%' THEN cui END) as with_emails,
-        COUNT(DISTINCT CASE WHEN verification_status = 'VERIFIED_OFFICIAL' OR verification_status = 'MANUALLY_CONFIRMED' THEN cui END) as verified_contacts
+        COUNT(DISTINCT CASE WHEN contact_type = 'MOBILE' THEN cui END) as with_mobile,
+        COUNT(DISTINCT CASE WHEN contact_type = 'LANDLINE' THEN cui END) as with_landline,
+        COUNT(DISTINCT CASE WHEN contact_type = 'EMAIL' THEN cui END) as with_emails,
+        COUNT(DISTINCT CASE WHEN contact_type = 'WEBSITE' THEN cui END) as with_websites,
+        COUNT(*) as total_contact_records
       FROM contact_records
     `)) || {};
+
+    // 2b. Sales Call & Execution Metrics (D1 CRM Actuals)
+    const salesPerformance = (await queryOne(`
+      SELECT 
+        COUNT(CASE WHEN interaction_type IN ('CALL', 'CALL_OUTGOING') THEN 1 END) as calls_attempted,
+        COUNT(CASE WHEN interaction_type IN ('CALL', 'CALL_OUTGOING') AND outcome NOT IN ('NO_ANSWER', 'UNAVAILABLE', 'WRONG_NUMBER') THEN 1 END) as calls_answered,
+        COUNT(DISTINCT CASE WHEN outcome = 'DECISION_MAKER_IDENTIFIED' THEN cui END) as decision_makers_identified,
+        COUNT(CASE WHEN outcome = 'CALLBACK_REQUESTED' OR next_follow_up_date IS NOT NULL THEN 1 END) as callbacks_scheduled,
+        COUNT(CASE WHEN outcome = 'MEETING_SCHEDULED' THEN 1 END) as meetings_scheduled,
+        COUNT(DISTINCT CASE WHEN outcome = 'INTERESTED' THEN cui END) as interested_companies,
+        COUNT(CASE WHEN outcome = 'OFFER_REQUESTED' THEN 1 END) as offers_requested,
+        COUNT(CASE WHEN outcome = 'OFFER_SENT' THEN 1 END) as offers_sent,
+        (SELECT COUNT(*) FROM prospect_pipeline WHERE status = 'CLIENT_WON') as customers_won,
+        (SELECT COUNT(*) FROM prospect_pipeline WHERE status IN ('LOST', 'NOT_INTERESTED')) as companies_lost,
+        (SELECT COUNT(*) FROM crm_follow_ups WHERE due_date < date('now') AND status = 'PENDING') as followups_overdue
+      FROM crm_interactions
+    `)) || {
+      calls_attempted: 0,
+      calls_answered: 0,
+      decision_makers_identified: 0,
+      callbacks_scheduled: 0,
+      meetings_scheduled: 0,
+      interested_companies: 0,
+      offers_requested: 0,
+      offers_sent: 0,
+      customers_won: 0,
+      companies_lost: 0,
+      followups_overdue: 0
+    };
 
     // 3. Sales CRM Pipeline Metrics
     const crmStats = (await queryOne(`
@@ -116,6 +145,7 @@ export async function GET(request: NextRequest) {
             recent_activity_count: recentActivityCount,
           },
           followups: followUpStats,
+          salesPerformance,
           opportunities: {
             ...oppSummary,
             by_category: oppsByCategory,
