@@ -106,14 +106,14 @@ export async function POST(
       for (const dc of anafItem.discoveredContacts) {
         await executeRun(
           `INSERT OR IGNORE INTO contact_records (
-            cui, contact_type, original_value, contact_value, label,
+            cui, contact_type, contact_value, normalized_value, label,
             source_name, provenance_url, verification_method, verification_status,
             confidence_score, notes, last_checked_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
           [
             cui,
             dc.contactType,
-            dc.originalValue,
+            dc.originalValue || dc.normalizedValue,
             dc.normalizedValue,
             dc.label,
             dc.sourceName,
