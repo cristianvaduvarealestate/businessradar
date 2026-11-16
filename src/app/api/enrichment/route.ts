@@ -49,8 +49,23 @@ export async function GET(req: NextRequest) {
     // 5. Total contact records count
     const totalContactsRow = await queryOne<{ total: number }>('SELECT count(*) as total FROM contact_records');
 
-    // 6. Current in-memory background job status
+    // 6. Durable job state from D1
+    const durableJob = await queryOne<any>(`
+      SELECT * FROM enrichment_job_state WHERE id = 'BULK_ENRICHMENT_JOB'
+    `).catch(() => null);
+
+    const checkStats = await queryOne<{ checked_count: number; no_contact_count: number }>(`
+      SELECT 
+        COUNT(CASE WHEN contact_checked_at IS NOT NULL THEN 1 END) as checked_count,
+        COUNT(CASE WHEN contact_check_status = 'NO_PUBLIC_CONTACT' THEN 1 END) as no_contact_count
+      FROM companies
+    `).catch(() => null);
+
+    // 7. Current background job status (combining durable state + in-memory)
     const currentJob = CompanyEnrichmentService.getProgress();
+
+    const checkedTotal = checkStats?.checked_count ?? durableJob?.companies_checked ?? 0;
+    const noContactTotal = checkStats?.no_contact_count ?? durableJob?.companies_without_contact ?? Math.max(0, totalCompanies - withAnyContact);
 
     return NextResponse.json({
       success: true,
@@ -58,14 +73,24 @@ export async function GET(req: NextRequest) {
         totalCompanies,
         totalContactRecords: totalContactsRow?.total || 0,
         companiesWithAnyContact: withAnyContact,
-        companiesWithNoContact: withNoContact,
+        companiesWithNoContact: noContactTotal,
+        companiesChecked: checkedTotal,
+        companiesRemaining: Math.max(0, totalCompanies - checkedTotal),
         companiesWithMobile: metricsRow?.mobile_count || 0,
         companiesWithLandline: metricsRow?.landline_count || 0,
         companiesWithEmail: metricsRow?.email_count || 0,
         companiesWithWebsite: metricsRow?.website_count || 0,
         contactsBySource: bySource,
         contactsByStatus: byStatus,
-        currentJob,
+        currentJob: {
+          ...currentJob,
+          status: durableJob?.status || currentJob.status,
+          total: totalCompanies,
+          processed: checkedTotal,
+          lastBatchAt: durableJob?.last_batch_at || null,
+          failedRequests: durableJob?.failed_requests || 0,
+          rateLimitedRequests: durableJob?.rate_limited_requests || 0,
+        },
       },
     });
   } catch (err: any) {
