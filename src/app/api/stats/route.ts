@@ -207,11 +207,42 @@ export async function GET(request: NextRequest) {
       SELECT COUNT(*) as count FROM crm_interactions WHERE datetime(created_at, '+7 days') >= datetime('now')
     `))?.count || 0;
 
+    // New Companies Monitoring Metrics
+    const newCompaniesStats = (await queryOne(`
+      SELECT 
+        COUNT(*) as total_new,
+        COUNT(CASE WHEN date(first_detected_at) >= date('now') THEN 1 END) as discovered_today,
+        COUNT(CASE WHEN date(first_detected_at) >= date('now', '-7 days') THEN 1 END) as discovered_last_7_days,
+        COUNT(CASE WHEN date(first_detected_at) >= date('now', '-30 days') THEN 1 END) as discovered_last_30_days,
+        COUNT(CASE WHEN verification_state IN ('FISCAL_STATUS_VERIFIED', 'CONTACT_AVAILABLE', 'QUALIFIED') THEN 1 END) as verified,
+        COUNT(CASE WHEN verification_state = 'DISCOVERED' THEN 1 END) as awaiting_verification,
+        COUNT(CASE WHEN qualification_status = 'POTENTIAL_PROSPECT' THEN 1 END) as potential_prospects,
+        COUNT(CASE WHEN EXISTS (
+          SELECT 1 FROM contact_records cr 
+          WHERE cr.cui = companies.cui 
+            AND cr.contact_value IS NOT NULL 
+            AND trim(cr.contact_value) != ''
+            AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'WRONG_NUMBER', 'CONFIRMED_INVALID')
+        ) THEN 1 END) as with_contacts
+      FROM companies
+      WHERE classification = 'NEW'
+    `)) || {
+      total_new: 0,
+      discovered_today: 0,
+      discovered_last_7_days: 0,
+      discovered_last_30_days: 0,
+      verified: 0,
+      awaiting_verification: 0,
+      potential_prospects: 0,
+      with_contacts: 0,
+    };
+
     return NextResponse.json(
       {
         success: true,
         data: {
           active_workspace: activeWorkspaceStats,
+          new_companies_workspace: newCompaniesStats,
           companies: compStats,
           verification: verificationStats,
           contacts: contactStats,

@@ -21,5 +21,10 @@
       "database_name": "businessradar-db",
       "database_id": "58b90910-e6d0-4c6b-8103-6d6cc62615ff"
     }
-  ]
+  ],
+  "triggers": {
+    "crons": [
+      "0 6 * * *"
+    ]
+  }
 }

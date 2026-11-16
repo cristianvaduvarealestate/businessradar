@@ -19,9 +19,10 @@ import {
 } from 'lucide-react';
 
 const NAV_ITEMS = [
-  { href: '/companies', label: 'FIRME', icon: Building2, badge: '128', highlight: true },
-  { href: '/pipeline', label: 'Activități & Follow-ups', icon: TrendingUp },
-  { href: '/settings', label: 'Configurare & Supresie', icon: Settings },
+  { href: '/companies', label: 'Firme existente', icon: Building2, badge: '128' },
+  { href: '/new-companies', label: 'Firme noi', icon: Sparkles, badge: 'Radar', highlight: true },
+  { href: '/pipeline', label: 'Activități', icon: TrendingUp },
+  { href: '/settings', label: 'Configurare', icon: Settings },
 ];
 
 export default function Navigation() {

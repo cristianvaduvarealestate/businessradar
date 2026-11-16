@@ -1,0 +1,85 @@
+name: ONRC Continuous Company Discovery
+
+on:
+  schedule:
+    # Daily run at 06:00 UTC (08:00 Bucharest time)
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry-run: scan and count without submitting to API'
+        required: false
+        type: boolean
+        default: false
+      force_sync:
+        description: 'Force synchronization even if dataset is unchanged'
+        required: false
+        type: boolean
+        default: false
+      batch_size:
+        description: 'Ingestion batch size (max 200)'
+        required: false
+        type: number
+        default: 50
+      max_limit:
+        description: 'Limit new companies discovered (0 = unlimited)'
+        required: false
+        type: number
+        default: 0
+
+concurrency:
+  group: onrc-sync-executor
+  cancel-in-progress: false
+
+jobs:
+  onrc-discovery-sync:
+    name: ONRC Dataset Discovery & Ingestion
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js Runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Record Execution Start Timestamp
+        id: timestamps
+        run: |
+          echo "start_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
+          echo "Job started at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+      - name: Execute ONRC Discovery Ingestion
+        env:
+          RADAR_INGESTION_URL: ${{ vars.RADAR_INGESTION_URL || 'https://businessradar.cristianvaduva.com/api/monitoring/ingest' }}
+          RADAR_INGESTION_SECRET: ${{ secrets.RADAR_INGESTION_SECRET }}
+        run: |
+          FLAGS="--mode api"
+          if [ "${{ inputs.dry_run }}" = "true" ] || [ -z "$RADAR_INGESTION_SECRET" ]; then
+            echo "[INFO] Running in DRY-RUN validation mode (safe verification without secret)"
+            FLAGS="$FLAGS --dry-run"
+          fi
+          if [ "${{ inputs.force_sync }}" = "true" ]; then
+            FLAGS="$FLAGS --force"
+          fi
+          if [ -n "${{ inputs.batch_size }}" ]; then
+            FLAGS="$FLAGS --batch-size ${{ inputs.batch_size }}"
+          fi
+          if [ -n "${{ inputs.max_limit }}" ] && [ "${{ inputs.max_limit }}" != "0" ]; then
+            FLAGS="$FLAGS --limit ${{ inputs.max_limit }}"
+          fi
+
+          echo "Running discovery executor with flags: $FLAGS"
+          node scripts/sync-onrc.js $FLAGS
+
+      - name: Record Completion Summary
+        if: always()
+        run: |
+          echo "Job finished at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"

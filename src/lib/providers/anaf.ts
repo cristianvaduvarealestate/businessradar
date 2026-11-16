@@ -174,3 +174,6 @@ export class AnafTaxConnector implements CompanyDataProvider {
     }
   }
 }
+
+export const anafConnector = new AnafTaxConnector();
+

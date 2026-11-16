@@ -34,10 +34,22 @@ export async function GET(request: NextRequest) {
     const hasAnyContact = searchParams.get('hasAnyContact');
     const noContact = searchParams.get('noContact');
     const needsVerification = searchParams.get('needsVerification');
-    const isNew = searchParams.get('isNew'); // 'true' for 90 days radar
+    const isNew = searchParams.get('isNew'); // legacy param
     const source = searchParams.get('source')?.trim() || '';
     const opportunity = searchParams.get('opportunity')?.trim() || '';
     const requiresCallback = searchParams.get('requiresCallback');
+
+    // Classification & Scope Filters (FIRME EXISTENTE vs FIRME NOI)
+    const scope = searchParams.get('scope')?.trim() || ''; // 'new', 'historical', 'all'
+    const classification = searchParams.get('classification')?.trim() || '';
+    const cohort = searchParams.get('cohort')?.trim().toLowerCase() || ''; // 'backfill', 'continuous', 'all'
+    const dateRange = searchParams.get('dateRange')?.trim() || '';
+    const fromDate = searchParams.get('fromDate')?.trim() || '';
+    const toDate = searchParams.get('toDate')?.trim() || '';
+    const legalForm = searchParams.get('legalForm')?.trim() || '';
+    const notYetQualified = searchParams.get('notYetQualified');
+    const potentialProspect = searchParams.get('potentialProspect');
+    const qualificationStatus = searchParams.get('qualificationStatus')?.trim() || '';
 
     // Verification & Calling View Filters
     const view = searchParams.get('view')?.trim() || '';
@@ -58,7 +70,56 @@ export async function GET(request: NextRequest) {
     const whereClauses: string[] = [];
     const params: any[] = [];
 
-    // FTS or Substring Search
+    // 1. Classification & Scope Clause
+    if (cohort === 'backfill' || classification === 'BACKFILL') {
+      whereClauses.push("classification = 'BACKFILL'");
+    } else if (cohort === 'continuous' || cohort === 'new' || classification === 'NEW') {
+      whereClauses.push("classification = 'NEW'");
+    } else if (scope === 'new') {
+      whereClauses.push("classification IN ('NEW', 'BACKFILL')");
+    } else if (scope === 'historical' || classification === 'HISTORICAL') {
+      whereClauses.push("classification = 'HISTORICAL'");
+    } else if (classification === 'PENDING_CLASSIFICATION') {
+      whereClauses.push("classification = 'PENDING_CLASSIFICATION'");
+    }
+
+    // 2. Date Range filters (primarily for FIRME NOI)
+    if (dateRange === 'today') {
+      whereClauses.push("(date(first_detected_at) >= date('now') OR date(registration_date) >= date('now'))");
+    } else if (dateRange === '7days') {
+      whereClauses.push("(date(first_detected_at) >= date('now', '-7 days') OR date(registration_date) >= date('now', '-7 days'))");
+    } else if (dateRange === '30days') {
+      whereClauses.push("(date(first_detected_at) >= date('now', '-30 days') OR date(registration_date) >= date('now', '-30 days'))");
+    } else if (dateRange === 'custom') {
+      if (fromDate) {
+        whereClauses.push("(date(first_detected_at) >= ? OR date(registration_date) >= ?)");
+        params.push(fromDate, fromDate);
+      }
+      if (toDate) {
+        whereClauses.push("(date(first_detected_at) <= ? OR date(registration_date) <= ?)");
+        params.push(toDate, toDate);
+      }
+    }
+
+    // 3. Legal Form filter
+    if (legalForm) {
+      whereClauses.push('legal_form = ?');
+      params.push(legalForm);
+    }
+
+    // 4. Qualification status filters
+    if (notYetQualified === 'true') {
+      whereClauses.push("qualification_status = 'NEW_COMPANY_NOT_ASSESSED'");
+    }
+    if (potentialProspect === 'true') {
+      whereClauses.push("qualification_status = 'POTENTIAL_PROSPECT'");
+    }
+    if (qualificationStatus) {
+      whereClauses.push('qualification_status = ?');
+      params.push(qualificationStatus);
+    }
+
+    // 5. FTS or Substring Search
     if (query) {
       if (/^\d+$/.test(query)) {
         whereClauses.push('(cui = ? OR cui LIKE ?)');
@@ -95,27 +156,35 @@ export async function GET(request: NextRequest) {
       params.push(status);
     }
 
-    // Primary Workspace View Filter (Active Workspace vs Secondary Views)
-    if (view === 'all' || callingView === 'all') {
-      // Secondary view: all companies without default active filter
-    } else if (view === 'excluded' || callingView === 'excluded' || ineligibleOnly === 'true') {
-      // Secondary view: excluded / ineligible companies
-      whereClauses.push("(legal_status IN ('RADIATED', 'SUSPENDED', 'DISSOLVED', 'IN_LIQUIDATION', 'VERIFICATION_ERROR') OR fiscal_status = 'FISCALLY_INACTIVE' OR cui IN (SELECT cui FROM suppression_list) OR (legal_status = 'ACTIVE' AND fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED') AND NOT EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND ((cr.contact_type IN ('MOBILE', 'LANDLINE') AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'WRONG_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '') OR (cr.contact_type = 'EMAIL' AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '')))))");
-    } else if (view === 'unverified' || callingView === 'needs_verification') {
-      // Secondary view: unverified legal status companies
-      whereClauses.push("legal_status = 'UNKNOWN'");
-    } else if (callingView === 'unconfirmed_commercial') {
-      whereClauses.push("commercial_evidence_status IN ('NO_FINANCIAL_EVIDENCE', 'LIMITED_COMMERCIAL_EVIDENCE', 'HISTORICAL_ACTIVITY_ONLY', 'COMMERCIAL_ACTIVITY_UNKNOWN') AND legal_status = 'ACTIVE' AND fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED')");
-    } else if (callingView === 'new_companies') {
-      whereClauses.push("commercial_evidence_status = 'NEW_COMPANY' AND legal_status = 'ACTIVE'");
-    } else if (callingView === 'unverified_contacts') {
-      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND cr.verification_status IN ('WRONG_NUMBER', 'INVALID_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED', 'FORMAT_VALID_ONLY', 'UNVERIFIED'))");
-    } else {
-      // DEFAULT ACTIVE WORKSPACE: Exactly active companies with usable contact channels
-      whereClauses.push("legal_status = 'ACTIVE'");
-      whereClauses.push("fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED')");
-      whereClauses.push("cui NOT IN (SELECT cui FROM suppression_list)");
-      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND ((cr.contact_type IN ('MOBILE', 'LANDLINE') AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'WRONG_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '') OR (cr.contact_type = 'EMAIL' AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '')))");
+    // Primary Workspace View Filter (Only applies to FIRME EXISTENTE when scope is not 'new')
+    if (scope !== 'new') {
+      if (view === 'all' || callingView === 'all') {
+        // Secondary view: all historical companies without default active filter
+      } else if (view === 'excluded' || callingView === 'excluded' || ineligibleOnly === 'true') {
+        // Secondary view: excluded / ineligible companies
+        whereClauses.push("(legal_status IN ('RADIATED', 'SUSPENDED', 'DISSOLVED', 'IN_LIQUIDATION', 'VERIFICATION_ERROR') OR fiscal_status = 'FISCALLY_INACTIVE' OR cui IN (SELECT cui FROM suppression_list) OR (legal_status = 'ACTIVE' AND fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED') AND NOT EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND ((cr.contact_type IN ('MOBILE', 'LANDLINE') AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'WRONG_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '') OR (cr.contact_type = 'EMAIL' AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '')))))");
+      } else if (view === 'unverified' || callingView === 'needs_verification') {
+        // Secondary view: unverified legal status companies
+        whereClauses.push("legal_status = 'UNKNOWN'");
+      } else if (callingView === 'unconfirmed_commercial') {
+        whereClauses.push("commercial_evidence_status IN ('NO_FINANCIAL_EVIDENCE', 'LIMITED_COMMERCIAL_EVIDENCE', 'HISTORICAL_ACTIVITY_ONLY', 'COMMERCIAL_ACTIVITY_UNKNOWN') AND legal_status = 'ACTIVE' AND fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED')");
+      } else if (callingView === 'new_companies') {
+        whereClauses.push("commercial_evidence_status = 'NEW_COMPANY' AND legal_status = 'ACTIVE'");
+      } else if (callingView === 'unverified_contacts') {
+        whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND cr.verification_status IN ('WRONG_NUMBER', 'INVALID_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED', 'FORMAT_VALID_ONLY', 'UNVERIFIED'))");
+      } else if (scope === 'historical' && view === 'active_prospects') {
+        // Active prospects view
+        whereClauses.push("legal_status = 'ACTIVE'");
+        whereClauses.push("fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED')");
+        whereClauses.push("cui NOT IN (SELECT cui FROM suppression_list)");
+        whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND ((cr.contact_type IN ('MOBILE', 'LANDLINE') AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'WRONG_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '') OR (cr.contact_type = 'EMAIL' AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '')))");
+      } else if (!scope && !view) {
+        // DEFAULT ACTIVE WORKSPACE: Exactly active companies with usable contact channels
+        whereClauses.push("legal_status = 'ACTIVE'");
+        whereClauses.push("fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED')");
+        whereClauses.push("cui NOT IN (SELECT cui FROM suppression_list)");
+        whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND ((cr.contact_type IN ('MOBILE', 'LANDLINE') AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'WRONG_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '') OR (cr.contact_type = 'EMAIL' AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '')))");
+      }
     }
 
     // CRM Status & Follow-up filters
@@ -234,16 +303,26 @@ export async function GET(request: NextRequest) {
     const totalCount = countRes?.total ?? 0;
 
     // Sorting
-    const sortField = searchParams.get('sort') || 'opportunity_score';
+    const sortField = searchParams.get('sort') || (scope === 'new' ? 'registration_date' : 'opportunity_score');
     const sortOrder = searchParams.get('order')?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-    const allowedSortFields = ['opportunity_score', 'first_observed_at', 'name', 'turnover', 'employees_avg'];
-    const safeSort = allowedSortFields.includes(sortField) ? sortField : 'opportunity_score';
+    const allowedSortFields = [
+      'opportunity_score',
+      'first_observed_at',
+      'first_detected_at',
+      'registration_date',
+      'incorporation_date',
+      'name',
+      'turnover',
+      'employees_avg',
+    ];
+    const safeSort = allowedSortFields.includes(sortField) ? sortField : 'registration_date';
 
-    // Query Data with verification columns
+    // Query Data with verification and classification columns
     const querySql = `
       SELECT 
-        id, cui, name, normalized_name, reg_com, legal_form, incorporation_date,
-        country, county, city, primary_caen, caen_description, status,
+        id, cui, name, normalized_name, reg_com, euid, legal_form, incorporation_date, registration_date,
+        first_detected_at, classification, verification_state, qualification_status, qualification_notes, insurance_relevance,
+        discovery_source, country, county, city, primary_caen, caen_description, status,
         website, first_observed_at, last_observed_at, data_completeness_score,
         opportunity_score, financial_trend, prospect_priority,
         legal_status, legal_status_desc, legal_status_date,

@@ -28,6 +28,7 @@ import {
   ArrowLeft,
   XCircle,
 } from 'lucide-react';
+import CompanyProfileDrawer from '@/components/CompanyProfileDrawer';
 
 const KANBAN_STAGES = [
   { id: 'NEW', label: 'Nou', color: 'border-titanium-700 bg-titanium-900/60' },
@@ -82,6 +83,7 @@ function PipelineContent() {
   const [followUpFilter, setFollowUpFilter] = useState(initialFilter);
   const [followUpCounts, setFollowUpCounts] = useState<any>({});
   const [followUpsLoading, setFollowUpsLoading] = useState(false);
+  const [selectedCui, setSelectedCui] = useState<number | null>(null);
 
   const fetchPipeline = async () => {
     setLoading(true);
@@ -350,13 +352,14 @@ function PipelineContent() {
                           className="p-3.5 bg-titanium-950 border border-titanium-800 rounded-xl space-y-2 hover:border-titanium-700 transition-all shadow-sm"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <Link
-                              href={`/companies/${item.cui}`}
-                              className="font-bold text-xs text-titanium-100 hover:text-radar-green transition-colors line-clamp-1"
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCui(item.cui)}
+                              className="font-bold text-xs text-titanium-100 hover:text-radar-green transition-colors line-clamp-1 text-left"
                               title={item.company_name}
                             >
                               {item.company_name}
-                            </Link>
+                            </button>
                             <span
                               className={`shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded ${
                                 item.priority === 'URGENT'
@@ -405,13 +408,14 @@ function PipelineContent() {
                               ))}
                             </select>
 
-                            <Link
-                              href={`/companies/${item.cui}`}
-                              className="text-titanium-400 hover:text-white flex items-center gap-0.5"
+                            <button
+                              type="button"
+                              onClick={() => setSelectedCui(item.cui)}
+                              className="text-titanium-400 hover:text-white flex items-center gap-0.5 text-xs"
                             >
-                              Dosar
+                              Profil
                               <ChevronRight className="w-3 h-3" />
-                            </Link>
+                            </button>
                           </div>
                         </div>
                       ))
@@ -651,6 +655,15 @@ function PipelineContent() {
           </div>
         </div>
       )}
+      {/* Unified Company Profile Drawer */}
+      <CompanyProfileDrawer
+        cui={selectedCui}
+        onClose={() => setSelectedCui(null)}
+        onRecordUpdated={() => {
+          fetchPipeline();
+          fetchFollowUps();
+        }}
+      />
     </div>
   );
 }
