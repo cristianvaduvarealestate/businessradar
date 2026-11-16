@@ -27,8 +27,10 @@ CREATE TABLE IF NOT EXISTS monitoring_config (
 );
 
 INSERT OR IGNORE INTO monitoring_config (key, value, description) VALUES
+('monitoring_state', 'NOT_ACTIVATED', 'Current operational state of company discovery (NOT_ACTIVATED, INITIAL_BACKFILL, CONTINUOUS_DISCOVERY, SOURCE_UNAVAILABLE, SYNC_FAILED)'),
 ('monitoring_status', 'STANDBY', 'Current operational status of automated company monitoring (ACTIVE, STANDBY, PAUSED)'),
-('monitoring_activation_date', '2026-10-01', 'Cutoff date for new company classification (registration_date >= cutoff => NEW)'),
+('monitoring_activation_date', '', 'Recorded ISO timestamp when continuous discovery was first activated upon complete initial sync (empty while unactivated)'),
+('baseline_backfill_cutoff', '2026-08-15', 'Baseline registration date cutoff for initial backfill vs historical cohort'),
 ('auto_sync_enabled', 'true', 'Whether scheduled synchronization is enabled'),
 ('cron_schedule', '0 6 * * *', 'Daily cron schedule expression (UTC)'),
 ('batch_limit', '50', 'Number of new companies to process per sync run'),
@@ -37,11 +39,13 @@ INSERT OR IGNORE INTO monitoring_config (key, value, description) VALUES
 ('active_package_id', 'c2c88c9d-4824-45f1-90ec-656f1c0d8785', 'CKAN package ID for latest ONRC dataset'),
 ('active_package_title', 'Firme înregistrate la Registrul Comerțului până la data de 04.11.2026', 'Title of latest ONRC dataset'),
 ('active_package_modified', '2026-11-06T05:19:37.832084', 'Publication timestamp of latest dataset'),
+('active_package_etag', '"1793942378.59-696515538"', 'HTTP ETag of latest dataset file'),
+('active_package_expected_size', '696515538', 'Expected dataset file size in bytes'),
 ('stream_cursor_line', '0', 'Line cursor for streaming pagination'),
 ('sync_lock', '0', 'Concurrency lock timestamp (0 = unlocked)'),
 ('last_successful_sync_at', '', 'Timestamp of last successful synchronization run'),
 ('last_attempted_sync_at', '', 'Timestamp of last attempted synchronization run'),
-('last_sync_status', 'WAITING_FIRST_SYNC', 'Status of last sync (WAITING_FIRST_SYNC, SUCCESS, FAILED, RUNNING)'),
+('last_sync_status', 'WAITING_FIRST_SYNC', 'Status of last sync (WAITING_FIRST_SYNC, IN_PROGRESS, SUCCESS, FAILED, SOURCE_UNAVAILABLE)'),
 ('last_sync_error', '', 'Error message from last failed sync, if any'),
 ('total_discovered_count', '0', 'Total number of newly discovered companies via monitoring');
 

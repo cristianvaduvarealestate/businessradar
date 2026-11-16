@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { queryOne, queryAll, executeRun } from '@/lib/db';
 import { anafConnector } from '@/lib/providers/anaf';
+import { MonitoringService, MonitoringState } from '@/lib/monitoring/service';
 
 export const dynamic = 'force-dynamic';
 
@@ -238,11 +239,16 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // 5. Get activation cutoff from monitoring_config
-  const configRow = await queryOne<{ value: string }>(
-    "SELECT value FROM monitoring_config WHERE key = 'monitoring_activation_date'"
+  // 5. Get monitoring configuration state
+  const configRows = await queryAll<{ key: string; value: string }>(
+    "SELECT key, value FROM monitoring_config WHERE key IN ('monitoring_state', 'monitoring_activation_date', 'baseline_backfill_cutoff')"
   );
-  const activationCutoff = configRow?.value || '2026-10-01';
+  const cfgMap: Record<string, string> = {};
+  for (const r of configRows) cfgMap[r.key] = r.value;
+
+  const monitoringState = (cfgMap['monitoring_state'] || 'NOT_ACTIVATED') as MonitoringState;
+  const activationDate = cfgMap['monitoring_activation_date'] || null;
+  const baselineCutoff = cfgMap['baseline_backfill_cutoff'] || '2026-08-15';
 
   let acceptedCount = 0;
   let duplicateCount = 0;
@@ -290,17 +296,19 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    let classification = 'HISTORICAL';
-    if (regDate >= activationCutoff) {
-      classification = 'NEW';
-      cohortCounts.NEW++;
-    } else if (regDate >= '2026-08-15') {
-      classification = 'BACKFILL';
-      cohortCounts.BACKFILL++;
-    } else {
-      classification = 'HISTORICAL';
-      cohortCounts.HISTORICAL++;
-    }
+    // Apply strict cohort classification semantics:
+    // Only classify as NEW if monitoring has been genuinely activated and regDate >= activationDate
+    const classification = MonitoringService.classifyCohort(
+      regDate,
+      monitoringState,
+      activationDate,
+      false,
+      baselineCutoff
+    );
+
+    if (classification === 'NEW') cohortCounts.NEW++;
+    else if (classification === 'BACKFILL') cohortCounts.BACKFILL++;
+    else cohortCounts.HISTORICAL++;
 
     let primaryCaen = item.primaryCaen || '7022';
     let caenDesc = item.caenDescription || 'Activități de consultanță pentru afaceri și management';
@@ -477,15 +485,42 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  await executeRun(
-    `INSERT INTO monitoring_config (key, value, updated_at) VALUES ('last_successful_sync_at', datetime('now'), datetime('now'))
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
-  );
+  // Update synchronization and activation state
+  if (body.isComplete) {
+    // Only on complete synchronization is the sync marked as SUCCESS and continuous activation recorded
+    await executeRun(
+      `INSERT INTO monitoring_config (key, value, updated_at) VALUES ('last_successful_sync_at', datetime('now'), datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+    );
 
-  await executeRun(
-    `INSERT INTO monitoring_config (key, value, updated_at) VALUES ('last_sync_status', 'SUCCESS', datetime('now'))
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
-  );
+    await executeRun(
+      `INSERT INTO monitoring_config (key, value, updated_at) VALUES ('last_sync_status', 'SUCCESS', datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+    );
+
+    if (monitoringState !== 'CONTINUOUS_DISCOVERY') {
+      await executeRun(
+        `INSERT INTO monitoring_config (key, value, updated_at) VALUES ('monitoring_state', 'CONTINUOUS_DISCOVERY', datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+      );
+      await executeRun(
+        `INSERT INTO monitoring_config (key, value, updated_at) VALUES ('monitoring_activation_date', datetime('now'), datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+      );
+    }
+  } else {
+    // Intermediate batch: mark status as IN_PROGRESS or INITIAL_BACKFILL
+    const currentProgressStatus = monitoringState === 'NOT_ACTIVATED' ? 'INITIAL_BACKFILL' : monitoringState;
+    await executeRun(
+      `INSERT INTO monitoring_config (key, value, updated_at) VALUES ('monitoring_state', ?, datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+      [currentProgressStatus]
+    );
+    await executeRun(
+      `INSERT INTO monitoring_config (key, value, updated_at) VALUES ('last_sync_status', 'IN_PROGRESS', datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+    );
+  }
 
   return NextResponse.json({
     success: true,
@@ -496,7 +531,8 @@ export async function POST(request: NextRequest) {
     rejected: rejectedCount,
     cohortCounts,
     anafVerified: anafVerifiedCount,
-    activationCutoff,
+    monitoringState: body.isComplete ? 'CONTINUOUS_DISCOVERY' : monitoringState,
+    activationDate,
     cursorEnd: body.cursorEnd,
     isComplete: Boolean(body.isComplete),
   });

@@ -56,6 +56,10 @@ jobs:
           echo "start_iso=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
           echo "Job started at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
+      - name: Run Official Source Connectivity Diagnostics
+        run: node scripts/diagnose-onrc.js
+        continue-on-error: true
+
       - name: Execute ONRC Discovery Ingestion
         env:
           RADAR_INGESTION_URL: ${{ vars.RADAR_INGESTION_URL || 'https://businessradar.cristianvaduva.com/api/monitoring/ingest' }}

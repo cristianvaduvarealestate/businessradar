@@ -339,8 +339,36 @@ function NewCompaniesContent() {
                   <Server className="w-4 h-4" />
                   <span>Stare Arhitectură Executor &amp; Sursă Date</span>
                 </div>
-                <div className="text-[11px] text-titanium-400">
-                  Activare cutoff: <strong className="text-white">{cfg.monitoring_activation_date || '2026-10-01'}</strong>
+                <div className="flex items-center gap-2">
+                  {cfg.monitoring_state === 'CONTINUOUS_DISCOVERY' ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-radar-emerald/20 text-radar-green border border-radar-emerald/30">
+                      CONTINUOUS DISCOVERY
+                    </span>
+                  ) : cfg.monitoring_state === 'INITIAL_BACKFILL' ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                      INITIAL BACKFILL
+                    </span>
+                  ) : cfg.monitoring_state === 'SOURCE_UNAVAILABLE' ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                      SURSĂ INDISPONIBILĂ (DATA.GOV.RO)
+                    </span>
+                  ) : cfg.monitoring_state === 'SYNC_FAILED' ? (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                      EROARE SINCRONIZARE
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-titanium-800 text-titanium-300 border border-titanium-700">
+                      NEACTIVAT (ÎN AȘTEPTARE BASELINE)
+                    </span>
+                  )}
+                  <div className="text-[11px] text-titanium-400">
+                    Dată activare continuă:{' '}
+                    <strong className="text-white">
+                      {cfg.monitoring_activation_date
+                        ? new Date(cfg.monitoring_activation_date).toLocaleDateString('ro-RO')
+                        : 'Neactivat'}
+                    </strong>
+                  </div>
                 </div>
               </div>
 

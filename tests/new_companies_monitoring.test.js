@@ -24,7 +24,10 @@ test('1. Monitoring configuration persists and provides activation cutoff and sc
   const rows = db.prepare('SELECT key, value FROM monitoring_config').all();
   const config = Object.fromEntries(rows.map((r) => [r.key, r.value]));
 
-  assert.ok(config.monitoring_activation_date, 'Activation cutoff date must be configured');
+  assert.ok(config.monitoring_state, 'Monitoring state must be configured');
+  assert.strictEqual(config.monitoring_state, 'NOT_ACTIVATED', 'Initial monitoring state must be NOT_ACTIVATED');
+  assert.strictEqual(config.monitoring_activation_date, '', 'Monitoring activation date must be empty until first complete sync');
+  assert.strictEqual(config.baseline_backfill_cutoff, '2026-08-15', 'Baseline backfill cutoff must be 2026-08-15');
   assert.ok(config.cron_schedule, 'Cron schedule must be configured');
   assert.ok(config.active_source, 'Active source must be configured');
   assert.strictEqual(config.active_source, 'ONRC_DATA_GOV', 'Active source must be ONRC Open Data');
@@ -34,62 +37,68 @@ test('1. Monitoring configuration persists and provides activation cutoff and sc
 
 test('2. Historical companies registered before cutoff belong to FIRME EXISTENTE (HISTORICAL)', () => {
   const db = new Database(DB_PATH, { readonly: true });
-  const cutoff = db.prepare("SELECT value FROM monitoring_config WHERE key = 'monitoring_activation_date'").get().value;
+  const cutoff = db.prepare("SELECT value FROM monitoring_config WHERE key = 'baseline_backfill_cutoff'").get().value;
 
-  // Check that all 2,908 historical companies have registration_date < cutoff or classification = 'HISTORICAL'
+  // Check that all 2,908 historical companies have registration_date < cutoff and classification = 'HISTORICAL'
   const historicalCount = db.prepare("SELECT COUNT(*) as count FROM companies WHERE classification = 'HISTORICAL'").get().count;
   assert.strictEqual(historicalCount, 2908, 'All 2,908 initial companies must remain classified as HISTORICAL');
 
   const registeredBeforeCutoff = db.prepare('SELECT COUNT(*) as count FROM companies WHERE registration_date < ?').get(cutoff).count;
-  assert.strictEqual(registeredBeforeCutoff, 2908, 'All 2,908 initial companies have registration dates before activation cutoff');
+  assert.strictEqual(registeredBeforeCutoff, 2908, 'All 2,908 initial companies have registration dates before baseline cutoff');
   db.close();
 });
 
-test('3. Companies registered on or after cutoff are classified as FIRME NOI (NEW)', () => {
+test('3. Companies discovered before complete sync are classified as INITIAL BACKFILL, never NEW', () => {
   const db = getIsolatedDb();
-  const cutoff = '2026-10-01';
-
-  // Insert a test company registered after cutoff
   const testCui = 99999001;
   db.prepare('DELETE FROM companies WHERE cui = ?').run(testCui);
 
   const regDate = '2026-10-15';
-  const isNew = regDate >= cutoff;
-  const classification = isNew ? 'NEW' : 'HISTORICAL';
+  // Before activation (monitoring_state = 'NOT_ACTIVATED' or 'INITIAL_BACKFILL'), classification is BACKFILL
+  const state = db.prepare("SELECT value FROM monitoring_config WHERE key = 'monitoring_state'").get().value;
+  assert.strictEqual(state, 'NOT_ACTIVATED');
+
+  const isActivated = state === 'CONTINUOUS_DISCOVERY';
+  const classification = isActivated ? 'NEW' : (regDate >= '2026-08-15' ? 'BACKFILL' : 'HISTORICAL');
 
   db.prepare(`
     INSERT INTO companies (
       cui, name, normalized_name, reg_com, legal_form, registration_date, incorporation_date,
       first_detected_at, classification, verification_state, qualification_status, discovery_source
-    ) VALUES (?, 'TEST NEW DISCOVERED SRL', 'TEST NEW DISCOVERED SRL', 'J40/9999/2026', 'SRL', ?, ?, datetime('now'), ?, 'DISCOVERED', 'NEW_COMPANY_NOT_ASSESSED', 'ONRC_DATA_GOV')
+    ) VALUES (?, 'TEST BACKFILL DISCOVERED SRL', 'TEST BACKFILL DISCOVERED SRL', 'J40/9999/2026', 'SRL', ?, ?, datetime('now'), ?, 'DISCOVERED', 'NEW_COMPANY_NOT_ASSESSED', 'ONRC_DATA_GOV')
   `).run(testCui, regDate, regDate, classification);
 
   const inserted = db.prepare('SELECT cui, classification, registration_date FROM companies WHERE cui = ?').get(testCui);
-  assert.strictEqual(inserted.classification, 'NEW', 'Company registered after cutoff must have classification NEW');
+  assert.strictEqual(inserted.classification, 'BACKFILL', 'Company discovered before complete sync must be classified as BACKFILL');
   assert.strictEqual(inserted.registration_date, '2026-10-15');
 
   cleanupIsolatedDb(db);
 });
 
-test('4. Company discovered today but registered before cutoff remains HISTORICAL', () => {
+test('4. Companies discovered after complete sync activation are classified as CONTINUOUS DISCOVERY (NEW)', () => {
   const db = getIsolatedDb();
-  const cutoff = '2026-10-01';
   const testCui = 99999002;
   db.prepare('DELETE FROM companies WHERE cui = ?').run(testCui);
 
-  const olderRegDate = '2024-05-10'; // older company
-  const isNew = olderRegDate >= cutoff;
-  const classification = isNew ? 'NEW' : 'HISTORICAL';
+  // Simulate complete initial sync activation
+  const activationDate = '2026-11-17';
+  db.prepare("UPDATE monitoring_config SET value = 'CONTINUOUS_DISCOVERY' WHERE key = 'monitoring_state'").run();
+  db.prepare("UPDATE monitoring_config SET value = ? WHERE key = 'monitoring_activation_date'").run(activationDate);
+
+  const newRegDate = '2026-11-18';
+  const state = db.prepare("SELECT value FROM monitoring_config WHERE key = 'monitoring_state'").get().value;
+  const isActivated = state === 'CONTINUOUS_DISCOVERY';
+  const classification = (isActivated && newRegDate >= activationDate) ? 'NEW' : 'BACKFILL';
 
   db.prepare(`
     INSERT INTO companies (
       cui, name, normalized_name, reg_com, legal_form, registration_date, incorporation_date,
       first_detected_at, classification, verification_state, qualification_status, discovery_source
-    ) VALUES (?, 'OLDER DISCOVERED TODAY SRL', 'OLDER DISCOVERED TODAY SRL', 'J40/1234/2024', 'SRL', ?, ?, datetime('now'), ?, 'DISCOVERED', 'NEW_COMPANY_NOT_ASSESSED', 'ONRC_DATA_GOV')
-  `).run(testCui, olderRegDate, olderRegDate, classification);
+    ) VALUES (?, 'CONTINUOUS DISCOVERY ACTIVE SRL', 'CONTINUOUS DISCOVERY ACTIVE SRL', 'J40/1234/2026', 'SRL', ?, ?, datetime('now'), ?, 'DISCOVERED', 'NEW_COMPANY_NOT_ASSESSED', 'ONRC_DATA_GOV')
+  `).run(testCui, newRegDate, newRegDate, classification);
 
   const inserted = db.prepare('SELECT cui, classification, registration_date, first_detected_at FROM companies WHERE cui = ?').get(testCui);
-  assert.strictEqual(inserted.classification, 'HISTORICAL', 'Company registered before cutoff must remain HISTORICAL even if detected today');
+  assert.strictEqual(inserted.classification, 'NEW', 'Company registered after activation timestamp must be NEW (Continuous Discovery)');
   assert.ok(inserted.first_detected_at, 'First detected timestamp must be preserved');
 
   cleanupIsolatedDb(db);

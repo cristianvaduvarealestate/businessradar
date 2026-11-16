@@ -63,35 +63,41 @@ test('2. Ingestion Schema & Batch Limits — Validates 200-item maximum batch li
 
 test('3. Cohort Classification — Accurately distinguishes Continuous Discovery vs Initial Backfill vs Historical', () => {
   const db = new Database(CANONICAL_DB_PATH, { readonly: true });
-  const cutoffRow = db.prepare("SELECT value FROM monitoring_config WHERE key = 'monitoring_activation_date'").get();
-  const activationCutoff = cutoffRow ? cutoffRow.value : '2026-10-01';
+  const baselineRow = db.prepare("SELECT value FROM monitoring_config WHERE key = 'baseline_backfill_cutoff'").get();
+  const baselineCutoff = baselineRow ? baselineRow.value : '2026-08-15';
 
-  function classifyCompany(registrationDate) {
-    if (registrationDate >= activationCutoff) {
-      return 'NEW'; // Continuous Discovery
-    } else if (registrationDate >= '2026-08-15') {
-      return 'BACKFILL'; // Initial Backfill
+  function classifyCompany(registrationDate, monitoringState, activationDate) {
+    if (!registrationDate || registrationDate < baselineCutoff) return 'HISTORICAL';
+    if (monitoringState === 'CONTINUOUS_DISCOVERY' && activationDate && registrationDate >= activationDate) {
+      return 'NEW';
     }
-    return 'HISTORICAL';
+    return 'BACKFILL';
   }
 
-  // 1. Continuous Discovery (registered on/after activation cutoff)
-  assert.strictEqual(classifyCompany('2026-10-15'), 'NEW', 'Company registered 2026-10-15 must be classified as NEW (Continuous)');
-  assert.strictEqual(classifyCompany('2026-11-02'), 'NEW', 'Company registered 2026-11-02 must be classified as NEW (Continuous)');
+  // 1. Unactivated monitoring state: even recent registrations are BACKFILL, never NEW
+  assert.strictEqual(classifyCompany('2026-10-15', 'NOT_ACTIVATED', null), 'BACKFILL', 'Before activation, companies belong to INITIAL BACKFILL');
+  assert.strictEqual(classifyCompany('2026-11-02', 'INITIAL_BACKFILL', null), 'BACKFILL', 'During initial backfill, companies are BACKFILL');
 
-  // 2. Initial Backfill (registered between 2026-08-15 and activation cutoff)
-  assert.strictEqual(classifyCompany('2026-08-15'), 'BACKFILL', 'Company registered 2026-08-15 must be classified as BACKFILL');
-  assert.strictEqual(classifyCompany('2026-09-01'), 'BACKFILL', 'Company registered 2026-09-01 must be classified as BACKFILL');
-  assert.strictEqual(classifyCompany('2026-09-30'), 'BACKFILL', 'Company registered 2026-09-30 must be classified as BACKFILL');
+  // 2. Continuous Discovery active: registered on or after activation timestamp -> NEW
+  const activeDate = '2026-11-17';
+  assert.strictEqual(classifyCompany('2026-11-18', 'CONTINUOUS_DISCOVERY', activeDate), 'NEW', 'Registered after activation timestamp must be NEW');
+  assert.strictEqual(classifyCompany('2026-11-17', 'CONTINUOUS_DISCOVERY', activeDate), 'NEW', 'Registered on activation date must be NEW');
 
-  // 3. Historical (registered before 2026-08-15)
-  assert.strictEqual(classifyCompany('2026-08-14'), 'HISTORICAL', 'Company registered 2026-08-14 must be classified as HISTORICAL');
-  assert.strictEqual(classifyCompany('1991-03-14'), 'HISTORICAL', 'Company registered 1991-03-14 must be classified as HISTORICAL');
+  // 3. Registered before activation date even with continuous discovery active -> BACKFILL
+  assert.strictEqual(classifyCompany('2026-09-01', 'CONTINUOUS_DISCOVERY', activeDate), 'BACKFILL', 'Registered before activation date is BACKFILL');
+  assert.strictEqual(classifyCompany('2026-08-15', 'CONTINUOUS_DISCOVERY', activeDate), 'BACKFILL', 'Registered on baseline cutoff is BACKFILL');
+
+  // 4. Historical (registered before baseline cutoff 2026-08-15)
+  assert.strictEqual(classifyCompany('2026-08-14', 'CONTINUOUS_DISCOVERY', activeDate), 'HISTORICAL', 'Company registered before 2026-08-15 must be HISTORICAL');
+  assert.strictEqual(classifyCompany('1991-03-14', 'CONTINUOUS_DISCOVERY', activeDate), 'HISTORICAL', 'Company registered 1991-03-14 must be HISTORICAL');
   db.close();
 });
 
 test('4. Ingestion Persistence & Deduplication — Ingests Continuous & Backfill companies without duplicating existing records', () => {
   const db = getIsolatedDb();
+  db.prepare("UPDATE monitoring_config SET value = 'CONTINUOUS_DISCOVERY' WHERE key = 'monitoring_state'").run();
+  db.prepare("UPDATE monitoring_config SET value = '2026-10-01' WHERE key = 'monitoring_activation_date'").run();
+
   const testCuiContinuous = 88800001; // Registered 2026-10-25 -> NEW
   const testCuiBackfill = 88800002;   // Registered 2026-09-01 -> BACKFILL
   const existingHistoricalCui = 412052; // Existing historical company from 1991

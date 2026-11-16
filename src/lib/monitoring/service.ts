@@ -3,9 +3,18 @@ import { anafConnector } from '@/lib/providers/anaf';
 import { ContactNormalizer } from '@/lib/enrichment/normalizer';
 import { InsuranceIntelligenceService } from '@/lib/insurance/intelligence';
 
+export type MonitoringState =
+  | 'NOT_ACTIVATED'
+  | 'INITIAL_BACKFILL'
+  | 'CONTINUOUS_DISCOVERY'
+  | 'SOURCE_UNAVAILABLE'
+  | 'SYNC_FAILED';
+
 export interface MonitoringConfig {
+  monitoring_state: MonitoringState;
   monitoring_status: string;
   monitoring_activation_date: string;
+  baseline_backfill_cutoff: string;
   auto_sync_enabled: string;
   cron_schedule: string;
   batch_limit: string;
@@ -14,6 +23,8 @@ export interface MonitoringConfig {
   active_package_id: string;
   active_package_title: string;
   active_package_modified: string;
+  active_package_etag?: string;
+  active_package_expected_size?: string;
   stream_cursor_line: string;
   sync_lock: string;
   last_successful_sync_at: string;
@@ -102,6 +113,40 @@ export class MonitoringService {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Determine cohort classification based on registration date and continuous monitoring state.
+   *
+   * Semantic rules:
+   * 1. Existing database CUIs remain strictly HISTORICAL.
+   * 2. Companies registered before baseline_cutoff (2026-08-15) remain strictly HISTORICAL.
+   * 3. Before complete baseline synchronization (NOT_ACTIVATED or INITIAL_BACKFILL),
+   *    no company is classified as NEW. They are classified as BACKFILL.
+   * 4. Only when monitoring_state is CONTINUOUS_DISCOVERY AND the company was registered
+   *    on or after the recorded activation date is it classified as NEW.
+   */
+  static classifyCohort(
+    registrationDate: string,
+    monitoringState: MonitoringState,
+    activationDate: string | null | undefined,
+    isExistingCui: boolean,
+    baselineCutoff: string = '2026-08-15'
+  ): 'HISTORICAL' | 'BACKFILL' | 'NEW' {
+    if (isExistingCui) return 'HISTORICAL';
+    if (!registrationDate || registrationDate < baselineCutoff) return 'HISTORICAL';
+
+    // Continuous discovery is active only after the first complete sync
+    if (
+      monitoringState === 'CONTINUOUS_DISCOVERY' &&
+      activationDate &&
+      activationDate.trim() !== '' &&
+      registrationDate >= activationDate
+    ) {
+      return 'NEW';
+    }
+
+    return 'BACKFILL';
   }
 
   /**
@@ -365,16 +410,23 @@ export class MonitoringService {
             isoDate = rawDate.split(' ')[0];
           }
 
-          // Check Classification
-          // If official registration date is on or after activation cutoff -> NEW
-          // Else -> HISTORICAL
-          const isNewCompany = isoDate ? isoDate >= activationCutoff : false;
-          const classification = isNewCompany ? 'NEW' : 'HISTORICAL';
+          const monitoringState = (config.monitoring_state || 'NOT_ACTIVATED') as MonitoringState;
+          const activationDate = config.monitoring_activation_date || null;
+          const baselineCutoff = config.baseline_backfill_cutoff || '2026-08-15';
 
           // Check if company already exists in database
           const existing = await queryOne<{ cui: number; classification: string }>(
             'SELECT cui, classification FROM companies WHERE cui = ?',
             [cui]
+          );
+
+          // Apply explicit cohort classification
+          const classification = MonitoringService.classifyCohort(
+            isoDate || '',
+            monitoringState,
+            activationDate,
+            !!existing,
+            baselineCutoff
           );
 
           if (existing) {
@@ -564,6 +616,12 @@ export class MonitoringService {
       await this.updateConfigKey('total_discovered_count', String(totalDiscovered));
       await this.updateConfigKey('sync_lock', '0');
 
+      // Record first complete continuous activation if not previously activated
+      if (config.monitoring_state !== 'CONTINUOUS_DISCOVERY') {
+        await this.updateConfigKey('monitoring_state', 'CONTINUOUS_DISCOVERY');
+        await this.updateConfigKey('monitoring_activation_date', nowIso);
+      }
+
       await executeRun(
         `UPDATE monitoring_sync_logs SET 
           ended_at = datetime('now'),
@@ -588,9 +646,24 @@ export class MonitoringService {
         message: `Sincronizare finalizată cu succes. ${discoveredCount} companii noi descoperite, ${updatedCount} actualizate.`,
       };
     } catch (err: any) {
+      const errMsg = err.message || 'Eroare necunoscută la sincronizare';
+      const isSourceUnavailable =
+        errMsg.includes('ETIMEDOUT') ||
+        errMsg.includes('timeout') ||
+        errMsg.includes('fetch failed') ||
+        errMsg.includes('ECONNREFUSED') ||
+        errMsg.includes('ENOTFOUND') ||
+        errMsg.includes('502') ||
+        errMsg.includes('503') ||
+        errMsg.includes('504');
+
+      const failedState: MonitoringState = isSourceUnavailable ? 'SOURCE_UNAVAILABLE' : 'SYNC_FAILED';
+
       // Release lock and record error
       await this.updateConfigKey('sync_lock', '0');
-      await this.updateConfigKey('last_sync_status', 'FAILED');
+      await this.updateConfigKey('monitoring_state', failedState);
+      await this.updateConfigKey('last_sync_status', failedState);
+      await this.updateConfigKey('last_sync_error', errMsg);
       await this.updateConfigKey('last_sync_error', err.message || 'Eroare necunoscută la sincronizare');
 
       await executeRun(

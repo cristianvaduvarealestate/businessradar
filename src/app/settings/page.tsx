@@ -100,7 +100,7 @@ export default function SettingsPage() {
         setMonitoringConfig(json.config || {});
         setSyncLogs(json.recentSyncs || []);
         if (json.config) {
-          setActivationDate(json.config.monitoring_activation_date || '2026-10-01');
+          setActivationDate(json.config.monitoring_activation_date || '');
           setBatchLimit(json.config.batch_limit || '50');
           setCronSchedule(json.config.cron_schedule || '0 6 * * *');
           setAutoSyncEnabled(json.config.auto_sync_enabled || 'true');
@@ -280,16 +280,17 @@ export default function SettingsPage() {
               <form onSubmit={handleSaveMonitoringConfig} className="space-y-3 text-xs">
                 <div>
                   <label className="text-[10px] font-semibold text-titanium-400 uppercase block mb-1">
-                    Dată Activare Monitorizare (Cutoff)
+                    Dată Activare Monitorizare Continuă
                   </label>
                   <input
                     type="date"
                     value={activationDate}
                     onChange={(e) => setActivationDate(e.target.value)}
+                    placeholder="Se înregistrează la prima sincronizare completă"
                     className="w-full bg-titanium-950 border border-titanium-700 text-white rounded-lg p-2 font-mono text-xs focus:border-radar-green focus:outline-none"
                   />
                   <p className="text-[10px] text-titanium-500 mt-1">
-                    Firmele înmatriculate la sau după această dată apar în <strong>FIRME NOI</strong>. Firmele anterioare rămân în baza istorică.
+                    Se înregistrează automat la finalizarea primei sincronizări complete. Înainte de activare, toate înregistrările noi apar ca <strong>INITIAL BACKFILL</strong>.
                   </p>
                 </div>
 
