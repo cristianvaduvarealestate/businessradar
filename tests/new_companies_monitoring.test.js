@@ -5,9 +5,22 @@ const Database = require('better-sqlite3');
 const fs = require('node:fs');
 
 const DB_PATH = path.join(__dirname, '..', 'data', 'radar_business.db');
+const ISOLATED_TEST_DB = path.join(__dirname, '..', 'data', 'test_monitoring_isolated.db');
+
+function getIsolatedDb() {
+  fs.copyFileSync(DB_PATH, ISOLATED_TEST_DB);
+  return new Database(ISOLATED_TEST_DB);
+}
+
+function cleanupIsolatedDb(db) {
+  if (db && db.open) db.close();
+  if (fs.existsSync(ISOLATED_TEST_DB)) {
+    try { fs.unlinkSync(ISOLATED_TEST_DB); } catch (e) {}
+  }
+}
 
 test('1. Monitoring configuration persists and provides activation cutoff and schedule', () => {
-  const db = new Database(DB_PATH);
+  const db = new Database(DB_PATH, { readonly: true });
   const rows = db.prepare('SELECT key, value FROM monitoring_config').all();
   const config = Object.fromEntries(rows.map((r) => [r.key, r.value]));
 
@@ -20,7 +33,7 @@ test('1. Monitoring configuration persists and provides activation cutoff and sc
 });
 
 test('2. Historical companies registered before cutoff belong to FIRME EXISTENTE (HISTORICAL)', () => {
-  const db = new Database(DB_PATH);
+  const db = new Database(DB_PATH, { readonly: true });
   const cutoff = db.prepare("SELECT value FROM monitoring_config WHERE key = 'monitoring_activation_date'").get().value;
 
   // Check that all 2,908 historical companies have registration_date < cutoff or classification = 'HISTORICAL'
@@ -33,7 +46,7 @@ test('2. Historical companies registered before cutoff belong to FIRME EXISTENTE
 });
 
 test('3. Companies registered on or after cutoff are classified as FIRME NOI (NEW)', () => {
-  const db = new Database(DB_PATH);
+  const db = getIsolatedDb();
   const cutoff = '2026-10-01';
 
   // Insert a test company registered after cutoff
@@ -55,13 +68,11 @@ test('3. Companies registered on or after cutoff are classified as FIRME NOI (NE
   assert.strictEqual(inserted.classification, 'NEW', 'Company registered after cutoff must have classification NEW');
   assert.strictEqual(inserted.registration_date, '2026-10-15');
 
-  // Clean up
-  db.prepare('DELETE FROM companies WHERE cui = ?').run(testCui);
-  db.close();
+  cleanupIsolatedDb(db);
 });
 
 test('4. Company discovered today but registered before cutoff remains HISTORICAL', () => {
-  const db = new Database(DB_PATH);
+  const db = getIsolatedDb();
   const cutoff = '2026-10-01';
   const testCui = 99999002;
   db.prepare('DELETE FROM companies WHERE cui = ?').run(testCui);
@@ -81,13 +92,11 @@ test('4. Company discovered today but registered before cutoff remains HISTORICA
   assert.strictEqual(inserted.classification, 'HISTORICAL', 'Company registered before cutoff must remain HISTORICAL even if detected today');
   assert.ok(inserted.first_detected_at, 'First detected timestamp must be preserved');
 
-  // Clean up
-  db.prepare('DELETE FROM companies WHERE cui = ?').run(testCui);
-  db.close();
+  cleanupIsolatedDb(db);
 });
 
 test('5. Duplicate CUI records merge into one canonical company without creating duplicate records', () => {
-  const db = new Database(DB_PATH);
+  const db = getIsolatedDb();
   const testCui = 99999003;
   db.prepare('DELETE FROM companies WHERE cui = ?').run(testCui);
 
@@ -112,9 +121,7 @@ test('5. Duplicate CUI records merge into one canonical company without creating
   const updated = db.prepare('SELECT name FROM companies WHERE cui = ?').get(testCui);
   assert.strictEqual(updated.name, 'UPDATED CORP SRL', 'Canonical record was updated with merged information');
 
-  // Clean up
-  db.prepare('DELETE FROM companies WHERE cui = ?').run(testCui);
-  db.close();
+  cleanupIsolatedDb(db);
 });
 
 test('6. Ingestion caret parser correctly extracts columns from ONRC dataset line', () => {
