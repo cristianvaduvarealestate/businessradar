@@ -32,6 +32,9 @@ import {
   Plus,
   X,
   FileSpreadsheet,
+  XCircle,
+  HelpCircle,
+  BadgeCheck,
 } from 'lucide-react';
 
 const OUTCOMES = [
@@ -50,20 +53,13 @@ const OUTCOMES = [
   { id: 'DO_NOT_CONTACT', label: 'Solicitare expresă: NU CONTACTAȚI', category: 'NEGATIVE' },
 ];
 
-const OPPORTUNITY_LABELS: Record<string, string> = {
-  TRANSPORT: 'Transport (CMR, CASCO flotă, Cargo)',
-  CONSTRUCTION: 'Construcții (CAR/EAR, Garanții SEAP)',
-  LIABILITY: 'Răspundere Civilă Generală & D&O',
-  IT_CYBER: 'IT & Cyber Risk (E&O, Data Breach)',
-  HEALTHCARE: 'Sănătate & Malpraxis Medical',
-  HOSPITALITY: 'Ospitalitate & HORECA (Incendiu / Bunuri)',
-  REAL_ESTATE: 'Imobiliare & Dezvoltare (Property / Răspundere)',
-};
-
 function CallingWorkspaceContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
+  const [activeTab, setActiveTab] = useState<'eligible' | 'excluded'>(
+    searchParams?.get('tab') === 'excluded' ? 'excluded' : 'eligible'
+  );
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<any>(null);
@@ -84,12 +80,14 @@ function CallingWorkspaceContent() {
   const [source, setSource] = useState(searchParams?.get('source') || '');
   const [opportunity, setOpportunity] = useState(searchParams?.get('opportunity') || '');
   const [requiresCallback, setRequiresCallback] = useState(searchParams?.get('requiresCallback') === 'true');
+  const [excludedFilter, setExcludedFilter] = useState<string>('all');
 
   // UI state
   const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
   const [activeCallCompany, setActiveCallCompany] = useState<any | null>(null);
   const [submittingOutcome, setSubmittingOutcome] = useState(false);
   const [outcomeSuccessMsg, setOutcomeSuccessMsg] = useState<string | null>(null);
+  const [verifyingCui, setVerifyingCui] = useState<number | null>(null);
 
   // Call Outcome Form
   const [callForm, setCallForm] = useState({
@@ -123,6 +121,20 @@ function CallingWorkspaceContent() {
         page: String(page),
         limit: '25',
       });
+
+      // Tab control: Eligible active prospects vs Excluded review list
+      if (activeTab === 'eligible') {
+        params.set('callingView', 'eligible');
+      } else {
+        params.set('callingView', 'excluded');
+        if (excludedFilter === 'radiated') params.set('legalStatus', 'RADIATED');
+        else if (excludedFilter === 'inactive') params.set('fiscalStatus', 'FISCALLY_INACTIVE');
+        else if (excludedFilter === 'suspended') params.set('legalStatus', 'SUSPENDED');
+        else if (excludedFilter === 'dissolved') params.set('legalStatus', 'DISSOLVED');
+        else if (excludedFilter === 'liquidation') params.set('legalStatus', 'IN_LIQUIDATION');
+        else if (excludedFilter === 'unknown') params.set('legalStatus', 'UNKNOWN');
+      }
+
       if (query) params.set('q', query);
       if (county) params.set('county', county);
       if (priority) params.set('priority', priority);
@@ -163,7 +175,7 @@ function CallingWorkspaceContent() {
 
   useEffect(() => {
     fetchCompanies(1);
-  }, [county, priority, stage, contactFilter, source, opportunity, requiresCallback]);
+  }, [activeTab, county, priority, stage, contactFilter, source, opportunity, requiresCallback, excludedFilter]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -174,6 +186,27 @@ function CallingWorkspaceContent() {
     navigator.clipboard.writeText(text);
     setCopiedPhone(text);
     setTimeout(() => setCopiedPhone(null), 2500);
+  };
+
+  const verifyCompanyNow = async (cui: number) => {
+    setVerifyingCui(cui);
+    try {
+      const res = await fetch(`/api/companies/${cui}/verify`, { method: 'POST' });
+      const json = await res.json();
+      if (json.success && json.data?.company) {
+        // Update company in list
+        setItems((prev) =>
+          prev.map((c) => (c.cui === cui ? { ...c, ...json.data.company } : c))
+        );
+        fetchStats();
+      } else {
+        alert(json.error || 'Eroare la verificare');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Eroare rețea');
+    } finally {
+      setVerifyingCui(null);
+    }
   };
 
   const openCallModal = (company: any, defaultPhone?: string) => {
@@ -199,12 +232,19 @@ function CallingWorkspaceContent() {
       const tomorrow = new Date(Date.now() + 86400000);
       nextDate = tomorrow.toISOString().slice(0, 10);
     }
-    setCallForm(prev => ({
+    setCallForm((prev) => ({
       ...prev,
       outcome: newOutcome,
       next_follow_up_date: nextDate || prev.next_follow_up_date,
       add_to_suppression: newOutcome === 'DO_NOT_CONTACT',
-      verify_contact: ['RECEPTION_ANSWERED', 'DECISION_MAKER_IDENTIFIED', 'INTERESTED', 'CALLBACK_REQUESTED', 'OFFER_REQUESTED', 'EXISTING_INSURANCE'].includes(newOutcome),
+      verify_contact: [
+        'RECEPTION_ANSWERED',
+        'DECISION_MAKER_IDENTIFIED',
+        'INTERESTED',
+        'CALLBACK_REQUESTED',
+        'OFFER_REQUESTED',
+        'EXISTING_INSURANCE',
+      ].includes(newOutcome),
     }));
   };
 
@@ -219,9 +259,13 @@ function CallingWorkspaceContent() {
         interaction_type: 'CALL_OUTGOING',
         outcome: callForm.outcome,
         notes: callForm.notes || `Apel înregistrat cu rezultatul: ${callForm.outcome}`,
-        contact_person: callForm.contact_person ? `${callForm.contact_person}${callForm.contact_position ? ` (${callForm.contact_position})` : ''}` : null,
+        contact_person: callForm.contact_person
+          ? `${callForm.contact_person}${callForm.contact_position ? ` (${callForm.contact_position})` : ''}`
+          : null,
         contact_value: callForm.contact_value || null,
-        next_action: callForm.next_action || (callForm.next_follow_up_date ? `Revenire / Follow-up (${callForm.outcome})` : null),
+        next_action:
+          callForm.next_action ||
+          (callForm.next_follow_up_date ? `Revenire / Follow-up (${callForm.outcome})` : null),
         next_follow_up_date: callForm.next_follow_up_date || null,
         verify_contact: callForm.verify_contact,
         add_to_suppression: callForm.add_to_suppression,
@@ -236,26 +280,41 @@ function CallingWorkspaceContent() {
       const json = await res.json();
       if (json.success) {
         setOutcomeSuccessMsg('Interacțiune salvată durabil în CRM!');
-        // Update local item state in-place
-        setItems(prev => prev.map(c => {
-          if (c.cui === activeCallCompany.cui) {
-            return {
-              ...c,
-              crm_status: callForm.outcome === 'DO_NOT_CONTACT' ? 'DO_NOT_CONTACT' :
-                          callForm.outcome === 'INTERESTED' ? 'INTERESTED' :
-                          callForm.outcome === 'OFFER_REQUESTED' ? 'OFFER_REQUESTED' :
-                          callForm.outcome === 'CALLBACK_REQUESTED' ? 'CALLBACK_REQUESTED' :
-                          callForm.outcome === 'NO_ANSWER' ? 'NO_ANSWER' :
-                          callForm.outcome === 'NOT_INTERESTED' ? 'NOT_INTERESTED' : 'CONTACTED',
-              last_interaction_outcome: callForm.outcome,
-              last_interaction_at: new Date().toISOString(),
-              next_follow_up_date: callForm.next_follow_up_date || c.next_follow_up_date,
-              mobile_status: callForm.verify_contact && c.mobile_phone === callForm.contact_value ? 'MANUALLY_CONFIRMED' : c.mobile_status,
-              landline_status: callForm.verify_contact && c.landline_phone === callForm.contact_value ? 'MANUALLY_CONFIRMED' : c.landline_status,
-            };
-          }
-          return c;
-        }));
+        setItems((prev) =>
+          prev.map((c) => {
+            if (c.cui === activeCallCompany.cui) {
+              return {
+                ...c,
+                crm_status:
+                  callForm.outcome === 'DO_NOT_CONTACT'
+                    ? 'DO_NOT_CONTACT'
+                    : callForm.outcome === 'INTERESTED'
+                    ? 'INTERESTED'
+                    : callForm.outcome === 'OFFER_REQUESTED'
+                    ? 'OFFER_REQUESTED'
+                    : callForm.outcome === 'CALLBACK_REQUESTED'
+                    ? 'CALLBACK_REQUESTED'
+                    : callForm.outcome === 'NO_ANSWER'
+                    ? 'NO_ANSWER'
+                    : callForm.outcome === 'NOT_INTERESTED'
+                    ? 'NOT_INTERESTED'
+                    : 'CONTACTED',
+                last_interaction_outcome: callForm.outcome,
+                last_interaction_at: new Date().toISOString(),
+                next_follow_up_date: callForm.next_follow_up_date || c.next_follow_up_date,
+                mobile_status:
+                  callForm.verify_contact && c.mobile_phone === callForm.contact_value
+                    ? 'MANUALLY_CONFIRMED'
+                    : c.mobile_status,
+                landline_status:
+                  callForm.verify_contact && c.landline_phone === callForm.contact_value
+                    ? 'MANUALLY_CONFIRMED'
+                    : c.landline_status,
+              };
+            }
+            return c;
+          })
+        );
 
         fetchStats();
         setTimeout(() => {
@@ -274,37 +333,158 @@ function CallingWorkspaceContent() {
 
   const handleExport = (type: string) => {
     const params = new URLSearchParams();
-    if (type === 'mobile') params.set('contactFilter', 'with_mobile');
-    else if (type === 'landline') params.set('contactFilter', 'with_landline');
-    else if (type === 'email') params.set('contactFilter', 'with_email');
-    else if (type === 'callbacks') params.set('requiresCallback', 'true');
-    else if (contactFilter === 'hasMobile') params.set('contactFilter', 'with_mobile');
-    else if (contactFilter === 'hasLandline') params.set('contactFilter', 'with_landline');
-    else if (contactFilter === 'hasEmail') params.set('contactFilter', 'with_email');
-    else if (contactFilter === 'hasAnyContact') params.set('contactFilter', 'with_any_contact');
-
+    if (activeTab === 'eligible') params.set('eligibleOnly', 'true');
     if (county) params.set('county', county);
     if (priority) params.set('priority', priority);
     if (opportunity) params.set('opportunity', opportunity);
-
     window.open(`/api/export?${params.toString()}`, '_blank');
   };
 
   const getSourceBadge = (sourceName: string, status: string) => {
     if (status === 'MANUALLY_CONFIRMED') {
-      return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">Confirmat Manual (1.00)</span>;
+      return (
+        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-1">
+          <BadgeCheck className="w-2.5 h-2.5" />
+          CONFIRMAT MANUAL
+        </span>
+      );
     }
     if (sourceName === 'ANAF_OPEN_DATA') {
-      return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">ANAF Declarat (0.85)</span>;
+      return (
+        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+          NUMĂR DECLARAT (ANAF)
+        </span>
+      );
     }
     if (sourceName === 'OFFICIAL_WEBSITE') {
-      return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">Site Oficial (0.95)</span>;
+      return (
+        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+          NUMĂR PUBLICAT PE SITE
+        </span>
+      );
     }
-    if (sourceName === 'HISTORICAL_REGISTRY') {
-      return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-zinc-700/60 text-zinc-300 border border-zinc-600">Registru Istoric</span>;
-    }
-    return <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-titanium-800 text-titanium-400">Neverificat</span>;
+    return (
+      <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-titanium-800 text-titanium-400">
+        NEVERIFICAT
+      </span>
+    );
   };
+
+  const getLegalStatusBadge = (status: string, desc?: string, date?: string) => {
+    if (status === 'ACTIVE') {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+          ACTIVĂ JURIDIC
+        </span>
+      );
+    }
+    if (status === 'RADIATED') {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1">
+          <XCircle className="w-3 h-3 text-rose-400" />
+          RADIATĂ {date ? `(${date})` : ''}
+        </span>
+      );
+    }
+    if (status === 'SUSPENDED') {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+          <AlertTriangle className="w-3 h-3 text-amber-400" />
+          SUSPENDATĂ
+        </span>
+      );
+    }
+    if (status === 'DISSOLVED') {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1">
+          <XCircle className="w-3 h-3 text-rose-400" />
+          DIZOLVATĂ
+        </span>
+      );
+    }
+    if (status === 'IN_LIQUIDATION') {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center gap-1">
+          <AlertOctagon className="w-3 h-3 text-purple-400" />
+          ÎN LICHIDARE / INSOLVENȚĂ
+        </span>
+      );
+    }
+    return (
+      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800 text-zinc-400 border border-zinc-700 flex items-center gap-1">
+        <HelpCircle className="w-3 h-3 text-zinc-400" />
+        DATE DE VERIFICAT
+      </span>
+    );
+  };
+
+  const getFiscalStatusBadge = (status: string, inactDate?: string, reactDate?: string) => {
+    if (status === 'FISCALLY_ACTIVE') {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+          ACTIVĂ FISCAL
+        </span>
+      );
+    }
+    if (status === 'REACTIVATED') {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+          REACTIVATĂ {reactDate ? `(${reactDate})` : ''}
+        </span>
+      );
+    }
+    if (status === 'FISCALLY_INACTIVE') {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+          INACTIVĂ FISCAL {inactDate ? `(${inactDate})` : ''}
+        </span>
+      );
+    }
+    return (
+      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-zinc-800 text-zinc-400 border border-zinc-700">
+        STATUT FISCAL NEVERIFICAT
+      </span>
+    );
+  };
+
+  const getCommercialBadge = (status?: string) => {
+    if (status === 'ACTIVE_COMMERCIAL_EVIDENCE') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40">
+          ACTIVITATE ECONOMICĂ DOCUMENTATĂ
+        </span>
+      );
+    }
+    if (status === 'NEW_COMPANY') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-teal-500/20 text-teal-300 border border-teal-500/40">
+          FIRMĂ NOUĂ
+        </span>
+      );
+    }
+    if (status === 'LIMITED_COMMERCIAL_EVIDENCE') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+          ACTIVITATE LIMITATĂ / CA 0
+        </span>
+      );
+    }
+    if (status === 'HISTORICAL_ACTIVITY_ONLY') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-700/50 text-zinc-400 border border-zinc-600">
+          ACTIVITATE ISTORICĂ DOAR
+        </span>
+      );
+    }
+    return (
+      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-800 text-zinc-400 border border-zinc-700">
+        ACTIVITATE NECONFIRMATĂ
+      </span>
+    );
+  };
+
+  const vStats = stats?.verification || {};
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto w-full">
@@ -314,16 +494,16 @@ function CallingWorkspaceContent() {
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold text-radar-green uppercase tracking-wider mb-1">
               <PhoneCall className="w-4 h-4" />
-              Execuție Vânzări & Prospectare B2B
+              Execuție Vânzări B2B & Calificare Riguroasă
             </div>
             <h1 className="text-2xl font-extrabold text-titanium-100 tracking-tight flex items-center gap-2.5">
               Workspace Apeluri Telefonice
               <span className="px-2 py-0.5 text-xs font-mono font-bold rounded-full bg-radar-emerald/20 text-radar-green border border-radar-emerald/30">
-                LIVE CRM
+                PROSPECTARE REALĂ
               </span>
             </h1>
             <p className="text-xs text-titanium-400 mt-1 max-w-3xl">
-              Apelează companiile românești calificate, identifică persoanele de decizie, discută temele de asigurare relevante conform CAEN și înregistrează fiecare rezultat direct în D1.
+              Afișează <strong>EXCLUSIV</strong> companii românești verificate legal și fiscal, cu coordonate reale de contact. Firmele radiate, dizolvate sau inactive fiscal sunt eliminate din apelarea uzuală.
             </p>
           </div>
 
@@ -345,104 +525,170 @@ function CallingWorkspaceContent() {
           </div>
         </div>
 
-        {/* Live CRM Top Stats Bar */}
+        {/* Official Verification Counters Bar */}
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mt-5">
-          <div className="bg-titanium-900 border border-titanium-800 rounded-lg p-3">
-            <div className="text-[10px] text-titanium-400 font-medium flex items-center justify-between">
-              <span>Companii cu Mobil</span>
-              <Smartphone className="w-3 h-3 text-emerald-400" />
+          <div className="bg-titanium-900 border border-emerald-500/40 rounded-lg p-3">
+            <div className="text-[10px] text-emerald-400 font-bold flex items-center justify-between">
+              <span>Eligibile pentru Apelare</span>
+              <BadgeCheck className="w-3.5 h-3.5 text-emerald-400" />
             </div>
-            <div className="text-lg font-bold font-mono text-emerald-400 mt-0.5">
-              {stats?.contacts?.with_mobile || 1121}
+            <div className="text-xl font-bold font-mono text-emerald-400 mt-0.5">
+              {vStats.calling_eligible ?? 128}
             </div>
-            <div className="text-[9px] text-titanium-500">Prefix +407 apelabil</div>
+            <div className="text-[9px] text-emerald-500 font-medium">Active juridic & fiscal</div>
           </div>
 
-          <div className="bg-titanium-900 border border-titanium-800 rounded-lg p-3">
-            <div className="text-[10px] text-titanium-400 font-medium flex items-center justify-between">
-              <span>Companii cu Fix</span>
-              <Phone className="w-3 h-3 text-cyan-400" />
+          <div className="bg-titanium-900 border border-rose-500/40 rounded-lg p-3">
+            <div className="text-[10px] text-rose-400 font-bold flex items-center justify-between">
+              <span>Radiate din Registru</span>
+              <XCircle className="w-3.5 h-3.5 text-rose-400" />
             </div>
-            <div className="text-lg font-bold font-mono text-cyan-400 mt-0.5">
-              {stats?.contacts?.with_landline || 402}
+            <div className="text-xl font-bold font-mono text-rose-400 mt-0.5">
+              {vStats.radiated ?? 208}
             </div>
-            <div className="text-[9px] text-titanium-500">Prefix +402 / +403</div>
+            <div className="text-[9px] text-rose-400/80">Excluse din apelare</div>
+          </div>
+
+          <div className="bg-titanium-900 border border-amber-500/40 rounded-lg p-3">
+            <div className="text-[10px] text-amber-400 font-bold flex items-center justify-between">
+              <span>Inactive Fiscal (ANAF)</span>
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+            </div>
+            <div className="text-xl font-bold font-mono text-amber-400 mt-0.5">
+              {vStats.fiscally_inactive ?? 76}
+            </div>
+            <div className="text-[9px] text-amber-400/80">Excluse din apelare</div>
+          </div>
+
+          <div className="bg-titanium-900 border border-purple-500/40 rounded-lg p-3">
+            <div className="text-[10px] text-purple-400 font-bold flex items-center justify-between">
+              <span>Dizolvate / Suspendate</span>
+              <AlertOctagon className="w-3.5 h-3.5 text-purple-400" />
+            </div>
+            <div className="text-xl font-bold font-mono text-purple-400 mt-0.5">
+              {(vStats.dissolved || 0) + (vStats.suspended || 0) + (vStats.in_liquidation || 0) || 31}
+            </div>
+            <div className="text-[9px] text-purple-400/80">Excluse din apelare</div>
+          </div>
+
+          <div className="bg-titanium-900 border border-cyan-500/40 rounded-lg p-3">
+            <div className="text-[10px] text-cyan-400 font-bold flex items-center justify-between">
+              <span>Active Juridic & Fiscal</span>
+              <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+            </div>
+            <div className="text-xl font-bold font-mono text-cyan-400 mt-0.5">
+              {vStats.legally_active ?? 125}
+            </div>
+            <div className="text-[9px] text-cyan-500 font-medium">Confirmate ONRC & ANAF</div>
           </div>
 
           <div className="bg-titanium-900 border border-titanium-800 rounded-lg p-3">
             <div className="text-[10px] text-titanium-400 font-medium flex items-center justify-between">
               <span>Apeluri Înregistrate</span>
-              <PhoneCall className="w-3 h-3 text-radar-green" />
+              <PhoneCall className="w-3.5 h-3.5 text-radar-green" />
             </div>
-            <div className="text-lg font-bold font-mono text-radar-green mt-0.5">
+            <div className="text-xl font-bold font-mono text-radar-green mt-0.5">
               {stats?.salesPerformance?.calls_attempted || 0}
             </div>
-            <div className="text-[9px] text-titanium-500">{stats?.salesPerformance?.calls_answered || 0} cu răspuns</div>
-          </div>
-
-          <div className="bg-titanium-900 border border-titanium-800 rounded-lg p-3">
-            <div className="text-[10px] text-titanium-400 font-medium flex items-center justify-between">
-              <span>Decidenți Găsiți</span>
-              <User className="w-3 h-3 text-purple-400" />
+            <div className="text-[9px] text-titanium-500">
+              {stats?.salesPerformance?.decision_makers_identified || 0} decidenți identificați
             </div>
-            <div className="text-lg font-bold font-mono text-purple-400 mt-0.5">
-              {stats?.salesPerformance?.decision_makers_identified || 0}
-            </div>
-            <div className="text-[9px] text-titanium-500">Contact direct administrator</div>
-          </div>
-
-          <div className="bg-titanium-900 border border-titanium-800 rounded-lg p-3">
-            <div className="text-[10px] text-titanium-400 font-medium flex items-center justify-between">
-              <span>Companii Interesate</span>
-              <CheckCircle2 className="w-3 h-3 text-teal-400" />
-            </div>
-            <div className="text-lg font-bold font-mono text-teal-400 mt-0.5">
-              {stats?.salesPerformance?.interested_companies || 0}
-            </div>
-            <div className="text-[9px] text-titanium-500">{stats?.salesPerformance?.offers_requested || 0} oferte cerute</div>
-          </div>
-
-          <div className="bg-titanium-900 border border-titanium-800 rounded-lg p-3">
-            <div className="text-[10px] text-titanium-400 font-medium flex items-center justify-between">
-              <span>Follow-ups Scadente</span>
-              <Calendar className="w-3 h-3 text-amber-400" />
-            </div>
-            <div className="text-lg font-bold font-mono text-amber-400 mt-0.5">
-              {stats?.followups?.followups_today || 0}
-            </div>
-            <div className="text-[9px] text-rose-400 font-medium">{stats?.followups?.followups_overdue || 0} depășite</div>
           </div>
         </div>
       </div>
 
+      {/* Primary Work View Tabs */}
+      <div className="flex items-center gap-3 border-b border-titanium-800 pb-1">
+        <button
+          onClick={() => {
+            setActiveTab('eligible');
+            setExcludedFilter('all');
+          }}
+          className={`pb-2.5 px-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-all ${
+            activeTab === 'eligible'
+              ? 'border-radar-green text-radar-green'
+              : 'border-transparent text-titanium-400 hover:text-titanium-200'
+          }`}
+        >
+          <BadgeCheck className="w-4 h-4" />
+          <span>Prospecte Active Eligibile</span>
+          <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-emerald-500/20 text-emerald-400">
+            {vStats.calling_eligible ?? 128}
+          </span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('excluded')}
+          className={`pb-2.5 px-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-all ${
+            activeTab === 'excluded'
+              ? 'border-rose-500 text-rose-400'
+              : 'border-transparent text-titanium-400 hover:text-titanium-200'
+          }`}
+        >
+          <XCircle className="w-4 h-4" />
+          <span>Companii Excluse / Revizuire</span>
+          <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-rose-500/20 text-rose-400">
+            {vStats.calling_excluded ?? 297}
+          </span>
+        </button>
+      </div>
+
       {/* Control Filters */}
       <div className="bg-titanium-900 border border-titanium-800 rounded-xl p-4 space-y-3">
-        {/* Contact Type Pills */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-titanium-800/80 pb-3">
-          <span className="text-[11px] font-bold text-titanium-400 uppercase tracking-wider mr-1">
-            Filtru Contact:
-          </span>
-          {[
-            { id: 'hasAnyContact', label: 'Toate cu Contact (1.504)' },
-            { id: 'hasMobile', label: 'Doar Mobil (1.121)' },
-            { id: 'hasLandline', label: 'Doar Fix (402)' },
-            { id: 'hasEmail', label: 'Doar Email (3)' },
-            { id: 'hasWebsite', label: 'Doar Website (9)' },
-            { id: 'noContact', label: 'Fără Contact (1.321)' },
-          ].map(f => (
-            <button
-              key={f.id}
-              onClick={() => setContactFilter(f.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                contactFilter === f.id
-                  ? 'bg-radar-emerald/20 text-radar-green border border-radar-emerald/40 font-bold'
-                  : 'bg-titanium-950 text-titanium-400 hover:text-titanium-200 border border-titanium-800'
-              }`}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+        {/* Sub-Filters for Excluded View */}
+        {activeTab === 'excluded' ? (
+          <div className="flex flex-wrap items-center gap-2 border-b border-titanium-800/80 pb-3">
+            <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider mr-1">
+              Motiv Excludere:
+            </span>
+            {[
+              { id: 'all', label: `Toate Excluse (${vStats.calling_excluded ?? 297})` },
+              { id: 'radiated', label: `Radiate din Registru (${vStats.radiated ?? 208})` },
+              { id: 'inactive', label: `Inactive Fiscal ANAF (${vStats.fiscally_inactive ?? 76})` },
+              { id: 'suspended', label: 'Suspendate' },
+              { id: 'dissolved', label: 'Dizolvate' },
+              { id: 'liquidation', label: 'În Lichidare' },
+              { id: 'unknown', label: 'Neverificate' },
+            ].map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setExcludedFilter(f.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  excludedFilter === f.id
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/50 font-bold'
+                    : 'bg-titanium-950 text-titanium-400 hover:text-titanium-200 border border-titanium-800'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 border-b border-titanium-800/80 pb-3">
+            <span className="text-[11px] font-bold text-titanium-400 uppercase tracking-wider mr-1">
+              Filtru Coordonate:
+            </span>
+            {[
+              { id: 'hasAnyContact', label: 'Toate cu Contact' },
+              { id: 'hasMobile', label: 'Doar Mobil (+407)' },
+              { id: 'hasLandline', label: 'Doar Fix (+402/+403)' },
+              { id: 'hasEmail', label: 'Doar Email' },
+              { id: 'hasWebsite', label: 'Doar Website' },
+            ].map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setContactFilter(f.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  contactFilter === f.id
+                    ? 'bg-radar-emerald/20 text-radar-green border border-radar-emerald/40 font-bold'
+                    : 'bg-titanium-950 text-titanium-400 hover:text-titanium-200 border border-titanium-800'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Detailed Dropdown Filters */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-2.5 pt-1">
@@ -454,7 +700,7 @@ function CallingWorkspaceContent() {
                 type="text"
                 placeholder="Caută după CUI, Nume, Telefon, Oraș..."
                 value={query}
-                onChange={e => setQuery(e.target.value)}
+                onChange={(e) => setQuery(e.target.value)}
                 className="w-full pl-9 pr-3 py-1.5 bg-titanium-950 border border-titanium-800 rounded-lg text-xs text-titanium-100 placeholder-titanium-500 focus:outline-none focus:border-radar-green"
               />
             </form>
@@ -464,12 +710,12 @@ function CallingWorkspaceContent() {
           <div>
             <select
               value={source}
-              onChange={e => setSource(e.target.value)}
+              onChange={(e) => setSource(e.target.value)}
               className="w-full px-2.5 py-1.5 bg-titanium-950 border border-titanium-800 rounded-lg text-xs text-titanium-200 focus:outline-none focus:border-radar-green"
             >
               <option value="">Toate Sursele</option>
-              <option value="ANAF">Declarat ANAF (1.546)</option>
-              <option value="WEBSITE">Site Oficial Scraper</option>
+              <option value="ANAF">Declarat ANAF</option>
+              <option value="WEBSITE">Site Oficial</option>
               <option value="MANUAL">Confirmat Manual</option>
             </select>
           </div>
@@ -478,7 +724,7 @@ function CallingWorkspaceContent() {
           <div>
             <select
               value={opportunity}
-              onChange={e => setOpportunity(e.target.value)}
+              onChange={(e) => setOpportunity(e.target.value)}
               className="w-full px-2.5 py-1.5 bg-titanium-950 border border-titanium-800 rounded-lg text-xs text-titanium-200 focus:outline-none focus:border-radar-green"
             >
               <option value="">Oportunitate Asigurare</option>
@@ -496,7 +742,7 @@ function CallingWorkspaceContent() {
           <div>
             <select
               value={county}
-              onChange={e => setCounty(e.target.value)}
+              onChange={(e) => setCounty(e.target.value)}
               className="w-full px-2.5 py-1.5 bg-titanium-950 border border-titanium-800 rounded-lg text-xs text-titanium-200 focus:outline-none focus:border-radar-green"
             >
               <option value="">Toate Județele</option>
@@ -513,7 +759,6 @@ function CallingWorkspaceContent() {
               <option value="Argeş">Argeș</option>
               <option value="Mureş">Mureș</option>
               <option value="Sibiu">Sibiu</option>
-              <option value="Suceava">Suceava</option>
             </select>
           </div>
 
@@ -521,7 +766,7 @@ function CallingWorkspaceContent() {
           <div>
             <select
               value={stage}
-              onChange={e => setStage(e.target.value)}
+              onChange={(e) => setStage(e.target.value)}
               className="w-full px-2.5 py-1.5 bg-titanium-950 border border-titanium-800 rounded-lg text-xs text-titanium-200 focus:outline-none focus:border-radar-green"
             >
               <option value="">Stadiu CRM</option>
@@ -532,8 +777,6 @@ function CallingWorkspaceContent() {
               <option value="INTERESTED">Interesat</option>
               <option value="OFFER_REQUESTED">Ofertă solicitată</option>
               <option value="OFFER_SENT">Ofertă transmisă</option>
-              <option value="NO_ANSWER">Nu a răspuns</option>
-              <option value="NOT_INTERESTED">Nu e interesat</option>
               <option value="CLIENT_WON">Client câștigat</option>
             </select>
           </div>
@@ -545,7 +788,7 @@ function CallingWorkspaceContent() {
             <input
               type="checkbox"
               checked={requiresCallback}
-              onChange={e => setRequiresCallback(e.target.checked)}
+              onChange={(e) => setRequiresCallback(e.target.checked)}
               className="rounded bg-titanium-950 border-titanium-700 text-radar-green focus:ring-0 w-3.5 h-3.5"
             />
             <span className={requiresCallback ? 'text-amber-400 font-bold' : ''}>
@@ -553,8 +796,8 @@ function CallingWorkspaceContent() {
             </span>
           </label>
 
-          <div className="text-[11px] text-titanium-500 font-mono">
-            {pagination.total.toLocaleString('ro-RO')} companii găsite
+          <div className="text-[11px] text-titanium-400 font-mono">
+            {pagination.total.toLocaleString('ro-RO')} companii găsite ({activeTab === 'eligible' ? 'Eligibile' : 'Excluse'})
           </div>
         </div>
       </div>
@@ -564,27 +807,38 @@ function CallingWorkspaceContent() {
         {loading ? (
           <div className="p-12 text-center bg-titanium-900 border border-titanium-800 rounded-xl space-y-3">
             <RefreshCw className="w-6 h-6 animate-spin text-radar-green mx-auto" />
-            <div className="text-xs text-titanium-400">Se încarcă prospectele pentru apelare...</div>
+            <div className="text-xs text-titanium-400">Se încarcă prospectele calificate...</div>
           </div>
         ) : items.length === 0 ? (
           <div className="p-12 text-center bg-titanium-900 border border-titanium-800 rounded-xl space-y-2">
             <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto" />
-            <div className="text-sm font-bold text-titanium-200">Nu au fost găsite companii conform filtrelor selectate.</div>
-            <div className="text-xs text-titanium-500">Modifică criteriile de filtrare sau șterge căutarea.</div>
+            <div className="text-sm font-bold text-titanium-200">
+              {activeTab === 'eligible'
+                ? 'Nu există companii eligibile conform filtrelor curente.'
+                : 'Nu au fost găsite companii excluse conform selecției.'}
+            </div>
+            <div className="text-xs text-titanium-500">Modifică criteriile de căutare sau alege alt județ.</div>
           </div>
         ) : (
           items.map((company) => {
-            const hasPhone = !!company.mobile_phone || !!company.landline_phone;
+            const briefing = company.insurance_briefing || {};
+            const products = briefing.recommendedProducts || [];
+            const questions = briefing.screeningQuestions || [];
+            const isEligible = company.is_calling_eligible === 1;
 
             return (
               <div
                 key={company.cui}
-                className="bg-titanium-900 border border-titanium-800 hover:border-titanium-700 rounded-xl p-5 space-y-4 transition-all"
+                className={`bg-titanium-900 border rounded-xl p-5 space-y-4 transition-all ${
+                  isEligible
+                    ? 'border-titanium-800 hover:border-emerald-500/50'
+                    : 'border-rose-900/50 bg-rose-950/10'
+                }`}
               >
-                {/* Top Row: Company Name, Codes, Location, Score, Status */}
+                {/* Top Row: Legal & Fiscal Status Badges, Identification */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-titanium-800/60 pb-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2.5 flex-wrap">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Link
                         href={`/companies/${company.cui}`}
                         className="text-base font-extrabold text-titanium-100 hover:text-radar-green transition-colors flex items-center gap-1.5"
@@ -600,6 +854,19 @@ function CallingWorkspaceContent() {
                           {company.reg_com}
                         </span>
                       )}
+
+                      {/* Legal Status Badge */}
+                      {getLegalStatusBadge(company.legal_status, company.legal_status_desc, company.legal_status_date)}
+
+                      {/* Fiscal Status Badge */}
+                      {getFiscalStatusBadge(
+                        company.fiscal_status,
+                        company.fiscal_inactivation_date,
+                        company.fiscal_reactivation_date
+                      )}
+
+                      {/* Commercial Evidence Badge */}
+                      {getCommercialBadge(company.commercial_evidence_status)}
                     </div>
 
                     <div className="flex items-center gap-2 text-xs text-titanium-400 flex-wrap">
@@ -612,10 +879,15 @@ function CallingWorkspaceContent() {
                   </div>
 
                   <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
-                    <div className="text-right">
-                      <div className="text-[10px] text-titanium-500 uppercase tracking-wider font-semibold">Oportunitate</div>
-                      <div className="text-sm font-bold font-mono text-radar-green">{company.opportunity_score}%</div>
-                    </div>
+                    <button
+                      onClick={() => verifyCompanyNow(company.cui)}
+                      disabled={verifyingCui === company.cui}
+                      title="Interoghează baza oficială ANAF în timp real"
+                      className="px-2.5 py-1 rounded-lg bg-titanium-800 hover:bg-titanium-750 text-titanium-300 border border-titanium-700 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${verifyingCui === company.cui ? 'animate-spin text-radar-green' : ''}`} />
+                      <span>{verifyingCui === company.cui ? 'Se verifică...' : 'Verifică acum'}</span>
+                    </button>
                     {company.crm_status && (
                       <span className="px-2.5 py-1 rounded text-xs font-bold bg-titanium-800 text-titanium-200 border border-titanium-700">
                         {company.crm_status}
@@ -624,15 +896,32 @@ function CallingWorkspaceContent() {
                   </div>
                 </div>
 
-                {/* Middle Row: PROMINENT PHONE NUMBERS & ACTIONS */}
+                {/* Eligibility Explanatory Banner */}
+                {isEligible ? (
+                  <div className="px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-300 flex items-center gap-2">
+                    <BadgeCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>
+                      <strong>Calificare Apelare Confirmată:</strong> Societate activă juridic în Registrul Comerțului, activă fiscal la ANAF, fără interdicții și cu telefon apelabil verificat.
+                    </span>
+                  </div>
+                ) : (
+                  <div className="px-3 py-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300 flex items-center gap-2">
+                    <XCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>
+                      <strong>Motiv Excludere din Apelare:</strong> {company.ineligibility_reasons || 'Statut neeligibil conform politicii de calificare.'}
+                    </span>
+                  </div>
+                )}
+
+                {/* Contact Row: PROMINENT PHONE NUMBERS & ACTIONS */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center bg-titanium-950/80 border border-titanium-800/80 rounded-lg p-3.5">
                   <div className="space-y-2">
                     <div className="text-[10px] font-bold text-titanium-400 uppercase tracking-wider">
-                      Coordonate de Apel Direct
+                      Canale Reale de Contact Oficial
                     </div>
 
                     <div className="flex flex-col gap-2">
-                      {/* Mobile Number */}
+                      {/* Mobile Phone */}
                       {company.mobile_phone ? (
                         <div className="flex items-center justify-between bg-titanium-900 border border-emerald-500/30 rounded-lg px-3 py-2">
                           <div className="flex items-center gap-2.5">
@@ -669,7 +958,7 @@ function CallingWorkspaceContent() {
                         </div>
                       ) : null}
 
-                      {/* Landline Number */}
+                      {/* Landline Phone */}
                       {company.landline_phone ? (
                         <div className="flex items-center justify-between bg-titanium-900 border border-cyan-500/30 rounded-lg px-3 py-2">
                           <div className="flex items-center gap-2.5">
@@ -706,14 +995,13 @@ function CallingWorkspaceContent() {
                         </div>
                       ) : null}
 
-                      {/* Fallback if no phone */}
                       {!company.mobile_phone && !company.landline_phone && (
-                        <div className="text-xs text-titanium-500 italic py-1">
-                          Niciun număr de telefon identificat în sursele publice oficiale.
+                        <div className="text-xs text-rose-400 italic py-1">
+                          Niciun număr de telefon identificat în evidențele publice.
                         </div>
                       )}
 
-                      {/* Email & Website Row */}
+                      {/* Email & Website */}
                       <div className="flex items-center gap-3 pt-1 text-xs">
                         {company.email_contact && (
                           <a
@@ -743,7 +1031,7 @@ function CallingWorkspaceContent() {
                   <div className="space-y-3 md:border-l md:border-titanium-800/80 md:pl-4">
                     <div className="flex items-center justify-between">
                       <div className="text-[10px] font-bold text-titanium-400 uppercase tracking-wider">
-                        Înregistrare Apel CRM
+                        Asistent & Istoric CRM
                       </div>
                       {company.last_interaction_outcome && (
                         <span className="text-[10px] font-mono text-titanium-400">
@@ -758,15 +1046,15 @@ function CallingWorkspaceContent() {
                         className="w-full px-3.5 py-2.5 rounded-lg bg-radar-emerald hover:bg-radar-emerald/90 text-titanium-950 font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2"
                       >
                         <PhoneCall className="w-4 h-4" />
-                        <span>Înregistrează Rezultat Apel</span>
+                        <span>Deschide Asistent Apel & Script</span>
                       </button>
 
                       <div className="flex items-center gap-2">
                         <Link
-                          href={`/companies/${company.cui}?tab=opportunities`}
+                          href={`/companies/${company.cui}`}
                           className="flex-1 px-3 py-1.5 rounded-lg bg-titanium-900 hover:bg-titanium-850 text-titanium-300 border border-titanium-700 text-[11px] font-medium text-center transition-colors"
                         >
-                          Dosar Asigurare
+                          Dossier Complet
                         </Link>
                         {company.next_follow_up_date && (
                           <span className="px-2 py-1 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 text-[10px] font-mono flex items-center gap-1">
@@ -779,16 +1067,56 @@ function CallingWorkspaceContent() {
                   </div>
                 </div>
 
-                {/* Bottom Row: SUGGESTED INSURANCE TOPICS */}
-                {company.insurance_topics && (
-                  <div className="bg-titanium-950/40 rounded-lg p-2.5 border border-titanium-800/40 flex items-start gap-2 text-xs">
-                    <ShieldCheck className="w-4 h-4 text-radar-green shrink-0 mt-0.5" />
-                    <div className="space-y-0.5">
-                      <div className="text-[10px] text-titanium-500 font-semibold uppercase tracking-wider">
-                        Teme de discuție sugerate (conform specificului CAEN {company.primary_caen}):
+                {/* Insurance Intelligence Briefing Block */}
+                {briefing.recommendedProducts && (
+                  <div className="bg-titanium-950/60 rounded-xl p-4 border border-titanium-800/80 space-y-3">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-radar-green" />
+                        <span className="text-xs font-bold text-titanium-200">
+                          Inteligență de Asigurare — Profil: {briefing.industryName}
+                        </span>
                       </div>
-                      <div className="text-titanium-300 font-medium">
-                        {company.insurance_topics}
+                      <span className="text-[10px] font-mono text-titanium-500">
+                        {briefing.disclaimer}
+                      </span>
+                    </div>
+
+                    {/* Products & Concrete Risks */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                      {products.slice(0, 2).map((prod: any, idx: number) => (
+                        <div key={idx} className="bg-titanium-900/80 rounded-lg p-3 border border-titanium-800 space-y-1.5">
+                          <div className="font-bold text-radar-green flex items-center justify-between">
+                            <span>{prod.productName}</span>
+                          </div>
+                          <p className="text-[11px] text-titanium-300 leading-relaxed">
+                            {prod.whyRelevant}
+                          </p>
+                          <div className="text-[10px] text-amber-300/90 font-medium">
+                            {prod.illustrativeLossExample}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Screening Question & Next Action */}
+                    <div className="pt-2 border-t border-titanium-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-bold text-titanium-400 uppercase tracking-wider">
+                          Întrebare de deschidere sugerată:
+                        </span>
+                        <div className="text-titanium-200 font-medium italic">
+                          &quot;{questions[0] || 'Cine se ocupă la dumneavoastră de polițele companiei?'}&quot;
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 text-right">
+                        <span className="text-[10px] font-bold text-radar-green uppercase tracking-wider block">
+                          Următorul Pas Recomandat:
+                        </span>
+                        <span className="text-[11px] text-titanium-300 font-medium">
+                          {briefing.recommendedNextAction || 'Identificare decident și calificare nevoi.'}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -829,20 +1157,18 @@ function CallingWorkspaceContent() {
         </div>
       )}
 
-      {/* MODAL: REGISTER CALL OUTCOME & SALES WORKFLOW */}
+      {/* MODAL: INTERACTIVE SALES CALL ASSISTANT */}
       {activeCallCompany && (
         <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-titanium-900 border border-titanium-700 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl space-y-5 p-6">
+          <div className="bg-titanium-900 border border-titanium-700 rounded-2xl w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl space-y-5 p-6">
             <div className="flex items-center justify-between border-b border-titanium-800 pb-3">
               <div>
-                <div className="text-xs font-bold text-radar-green uppercase tracking-wider">
-                  Înregistrare Apel Comercial
+                <div className="text-xs font-bold text-radar-green uppercase tracking-wider flex items-center gap-1.5">
+                  <PhoneCall className="w-3.5 h-3.5" />
+                  Asistent Apel Vânzări — {activeCallCompany.name}
                 </div>
-                <h3 className="text-lg font-bold text-titanium-100">
-                  {activeCallCompany.name}
-                </h3>
-                <div className="text-xs text-titanium-400 font-mono">
-                  CUI: {activeCallCompany.cui} • {activeCallCompany.county}
+                <div className="text-xs text-titanium-400 font-mono mt-0.5">
+                  CUI: {activeCallCompany.cui} • {activeCallCompany.county} • CAEN {activeCallCompany.primary_caen}
                 </div>
               </div>
               <button
@@ -853,6 +1179,37 @@ function CallingWorkspaceContent() {
               </button>
             </div>
 
+            {/* Telephone Script Panel */}
+            <div className="bg-radar-emerald/10 border border-radar-emerald/30 rounded-xl p-4 space-y-2">
+              <div className="text-xs font-bold text-radar-green uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5" />
+                Script Conversațional de Deschidere (Română)
+              </div>
+              <p className="text-xs text-titanium-200 leading-relaxed italic">
+                &quot;{activeCallCompany.insurance_briefing?.openingScript ||
+                  'Bună ziua! Vă contactez în legătură cu activitatea companiei dumneavoastră. Lucrăm cu firme locale pentru evaluarea riscurilor și optimizarea protecției prin asigurare. Aș vrea să vă adresez două întrebări scurte legate de asigurările companiei: cine gestionează la dumneavoastră aceste polițe?'}&quot;
+              </p>
+            </div>
+
+            {/* 5 Phone Questions */}
+            {activeCallCompany.insurance_briefing?.screeningQuestions && (
+              <div className="bg-titanium-950/70 border border-titanium-800 rounded-xl p-4 space-y-2.5">
+                <div className="text-xs font-bold text-titanium-300 uppercase tracking-wider">
+                  5 Întrebări de Calificare Recomandate:
+                </div>
+                <div className="space-y-1.5">
+                  {activeCallCompany.insurance_briefing.screeningQuestions.map(
+                    (q: string, i: number) => (
+                      <div key={i} className="text-xs text-titanium-300 flex items-start gap-2">
+                        <span className="font-mono text-radar-green font-bold shrink-0">{i + 1}.</span>
+                        <span>{q}</span>
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+            )}
+
             {outcomeSuccessMsg ? (
               <div className="p-6 text-center space-y-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
                 <CheckCircle2 className="w-10 h-10 text-radar-green mx-auto" />
@@ -860,7 +1217,7 @@ function CallingWorkspaceContent() {
                 <div className="text-xs text-titanium-400">Datele au fost sincronizate durabil în D1.</div>
               </div>
             ) : (
-              <form onSubmit={submitCallOutcome} className="space-y-4">
+              <form onSubmit={submitCallOutcome} className="space-y-4 pt-1">
                 {/* 1. Număr apelat */}
                 <div>
                   <label className="block text-xs font-bold text-titanium-300 mb-1">
@@ -870,19 +1227,19 @@ function CallingWorkspaceContent() {
                     type="text"
                     required
                     value={callForm.contact_value}
-                    onChange={e => setCallForm({ ...callForm, contact_value: e.target.value })}
+                    onChange={(e) => setCallForm({ ...callForm, contact_value: e.target.value })}
                     className="w-full px-3 py-2 bg-titanium-950 border border-titanium-700 rounded-lg text-sm text-titanium-100 font-mono focus:outline-none focus:border-radar-green"
-                    placeholder="ex: 0722123456"
+                    placeholder="ex: +40722123456"
                   />
                 </div>
 
-                {/* 2. Rezultat Apel (Grid de opțiuni) */}
+                {/* 2. Rezultat Apel */}
                 <div>
                   <label className="block text-xs font-bold text-titanium-300 mb-2">
                     Rezultatul apelului:
                   </label>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {OUTCOMES.map(out => (
+                    {OUTCOMES.map((out) => (
                       <button
                         type="button"
                         key={out.id}
@@ -909,13 +1266,13 @@ function CallingWorkspaceContent() {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-titanium-300 mb-1">
-                      Persoană de contact:
+                      Persoană identificată:
                     </label>
                     <input
                       type="text"
                       value={callForm.contact_person}
-                      onChange={e => setCallForm({ ...callForm, contact_person: e.target.value })}
-                      placeholder="ex: Ion Popescu"
+                      onChange={(e) => setCallForm({ ...callForm, contact_person: e.target.value })}
+                      placeholder="ex: Andrei Popescu"
                       className="w-full px-3 py-1.5 bg-titanium-950 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-radar-green"
                     />
                   </div>
@@ -926,7 +1283,7 @@ function CallingWorkspaceContent() {
                     <input
                       type="text"
                       value={callForm.contact_position}
-                      onChange={e => setCallForm({ ...callForm, contact_position: e.target.value })}
+                      onChange={(e) => setCallForm({ ...callForm, contact_position: e.target.value })}
                       placeholder="ex: Administrator / Director"
                       className="w-full px-3 py-1.5 bg-titanium-950 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-radar-green"
                     />
@@ -942,8 +1299,8 @@ function CallingWorkspaceContent() {
                     rows={3}
                     required
                     value={callForm.notes}
-                    onChange={e => setCallForm({ ...callForm, notes: e.target.value })}
-                    placeholder="Menționează ce s-a discutat, obiecțiile ridicate sau interesul exprimat..."
+                    onChange={(e) => setCallForm({ ...callForm, notes: e.target.value })}
+                    placeholder="Menționează ce s-a discutat, obiecțiile sau asigurările existente menționate..."
                     className="w-full px-3 py-2 bg-titanium-950 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-radar-green"
                   />
                 </div>
@@ -957,7 +1314,7 @@ function CallingWorkspaceContent() {
                     <input
                       type="date"
                       value={callForm.next_follow_up_date}
-                      onChange={e => setCallForm({ ...callForm, next_follow_up_date: e.target.value })}
+                      onChange={(e) => setCallForm({ ...callForm, next_follow_up_date: e.target.value })}
                       className="w-full px-3 py-1.5 bg-titanium-900 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-radar-green"
                     />
                   </div>
@@ -968,8 +1325,8 @@ function CallingWorkspaceContent() {
                     <input
                       type="text"
                       value={callForm.next_action}
-                      onChange={e => setCallForm({ ...callForm, next_action: e.target.value })}
-                      placeholder="ex: Trimis cotație CMR pe email"
+                      onChange={(e) => setCallForm({ ...callForm, next_action: e.target.value })}
+                      placeholder="ex: Transmitere ofertă CASCO & CMR"
                       className="w-full px-3 py-1.5 bg-titanium-900 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-radar-green"
                     />
                   </div>
@@ -981,11 +1338,11 @@ function CallingWorkspaceContent() {
                     <input
                       type="checkbox"
                       checked={callForm.verify_contact}
-                      onChange={e => setCallForm({ ...callForm, verify_contact: e.target.checked })}
+                      onChange={(e) => setCallForm({ ...callForm, verify_contact: e.target.checked })}
                       className="rounded bg-titanium-950 border-titanium-700 text-radar-green w-4 h-4"
                     />
                     <span>
-                      Confirmă acest număr ca fiind <strong>activ și verificat direct</strong> (actualizează scorul la 1.00 în baza de date)
+                      Confirmă manual acest număr ca fiind <strong>activ și valid</strong> (actualizează la MANUALLY_CONFIRMED)
                     </span>
                   </label>
 
@@ -994,11 +1351,11 @@ function CallingWorkspaceContent() {
                       <input
                         type="checkbox"
                         checked={callForm.add_to_suppression}
-                        onChange={e => setCallForm({ ...callForm, add_to_suppression: e.target.checked })}
+                        onChange={(e) => setCallForm({ ...callForm, add_to_suppression: e.target.checked })}
                         className="rounded bg-titanium-950 border-rose-500 text-rose-500 w-4 h-4"
                       />
                       <span>
-                        Adaugă firma în <strong>Lista Oficială de Supresie</strong> (blochează exportul și reapelarea)
+                        Adaugă firma în <strong>Lista Oficială de Supresie</strong> (blochează apelarea și exportul)
                       </span>
                     </label>
                   )}
@@ -1033,11 +1390,13 @@ function CallingWorkspaceContent() {
 
 export default function CallingWorkspacePage() {
   return (
-    <Suspense fallback={
-      <div className="p-12 text-center text-xs text-titanium-400">
-        Se încarcă workspace-ul de apeluri...
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="p-12 text-center text-xs text-titanium-400">
+          Se încarcă workspace-ul de apeluri...
+        </div>
+      }
+    >
       <CallingWorkspaceContent />
     </Suspense>
   );

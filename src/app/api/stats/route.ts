@@ -28,7 +28,30 @@ export async function GET(request: NextRequest) {
       FROM companies
     `)) || {};
 
-    // 2. Contact Verification Coverage (Canonical Reconciled SQL)
+    // 2. Official Legal & Fiscal Verification Metrics
+    const verificationStats = (await queryOne(`
+      SELECT
+        COUNT(CASE WHEN last_status_check_at IS NOT NULL THEN 1 END) as total_verified,
+        COUNT(CASE WHEN legal_status = 'ACTIVE' THEN 1 END) as legally_active,
+        COUNT(CASE WHEN legal_status = 'RADIATED' THEN 1 END) as radiated,
+        COUNT(CASE WHEN legal_status = 'SUSPENDED' THEN 1 END) as suspended,
+        COUNT(CASE WHEN legal_status = 'DISSOLVED' THEN 1 END) as dissolved,
+        COUNT(CASE WHEN legal_status = 'IN_LIQUIDATION' THEN 1 END) as in_liquidation,
+        COUNT(CASE WHEN legal_status = 'UNKNOWN' THEN 1 END) as legal_unknown,
+        COUNT(CASE WHEN fiscal_status = 'FISCALLY_ACTIVE' THEN 1 END) as fiscally_active,
+        COUNT(CASE WHEN fiscal_status = 'FISCALLY_INACTIVE' THEN 1 END) as fiscally_inactive,
+        COUNT(CASE WHEN fiscal_status = 'REACTIVATED' THEN 1 END) as reactivated,
+        COUNT(CASE WHEN fiscal_status = 'UNKNOWN' THEN 1 END) as fiscal_unknown,
+        COUNT(CASE WHEN is_calling_eligible = 1 THEN 1 END) as calling_eligible,
+        COUNT(CASE WHEN is_calling_eligible = 0 THEN 1 END) as calling_excluded,
+        COUNT(CASE WHEN commercial_evidence_status = 'ACTIVE_COMMERCIAL_EVIDENCE' THEN 1 END) as active_commercial,
+        COUNT(CASE WHEN commercial_evidence_status = 'LIMITED_COMMERCIAL_EVIDENCE' THEN 1 END) as limited_commercial,
+        COUNT(CASE WHEN commercial_evidence_status = 'NEW_COMPANY' THEN 1 END) as new_company,
+        COUNT(CASE WHEN commercial_evidence_status IN ('NO_FINANCIAL_EVIDENCE', 'COMMERCIAL_ACTIVITY_UNKNOWN') THEN 1 END) as no_financial_evidence
+      FROM companies
+    `)) || {};
+
+    // 3. Contact Verification Coverage (Canonical Reconciled SQL)
     const contactStats = (await queryOne(`
       SELECT 
         COUNT(DISTINCT cui) as companies_with_any_contact,
@@ -40,7 +63,7 @@ export async function GET(request: NextRequest) {
       FROM contact_records
     `)) || {};
 
-    // 2b. Sales Call & Execution Metrics (D1 CRM Actuals)
+    // 4. Sales Call & Execution Metrics (D1 CRM Actuals)
     const salesPerformance = (await queryOne(`
       SELECT 
         COUNT(CASE WHEN interaction_type IN ('CALL', 'CALL_OUTGOING') THEN 1 END) as calls_attempted,
@@ -69,7 +92,7 @@ export async function GET(request: NextRequest) {
       followups_overdue: 0
     };
 
-    // 3. Sales CRM Pipeline Metrics
+    // 5. Sales CRM Pipeline Metrics
     const crmStats = (await queryOne(`
       SELECT 
         COUNT(CASE WHEN status IN ('NEW', 'NEW_DISCOVERED') THEN 1 END) as not_yet_contacted,
@@ -82,7 +105,7 @@ export async function GET(request: NextRequest) {
       FROM prospect_pipeline
     `)) || {};
 
-    // 4. Follow-Up Metrics
+    // 6. Follow-Up Metrics
     const followUpStats = (await queryOne(`
       SELECT 
         COUNT(CASE WHEN due_date = ? AND status = 'PENDING' THEN 1 END) as followups_today,
@@ -138,6 +161,7 @@ export async function GET(request: NextRequest) {
         success: true,
         data: {
           companies: compStats,
+          verification: verificationStats,
           contacts: contactStats,
           crm: {
             ...crmStats,

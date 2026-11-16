@@ -151,9 +151,20 @@ export async function GET(request: NextRequest) {
     ];
     const params: any[] = [];
 
-    if (priority) {
-      whereClauses.push('prospect_priority = ?');
-      params.push(priority);
+    const eligibleOnly = searchParams.get('eligibleOnly');
+    const legalStatus = searchParams.get('legalStatus');
+    const fiscalStatus = searchParams.get('fiscalStatus');
+
+    if (eligibleOnly === 'true') {
+      whereClauses.push('is_calling_eligible = 1');
+    }
+    if (legalStatus) {
+      whereClauses.push('legal_status = ?');
+      params.push(legalStatus);
+    }
+    if (fiscalStatus) {
+      whereClauses.push('fiscal_status = ?');
+      params.push(fiscalStatus);
     }
     if (county) {
       whereClauses.push('county = ?');
@@ -191,7 +202,7 @@ export async function GET(request: NextRequest) {
       SELECT 
         cui, name, reg_com, legal_form, incorporation_date, county, city,
         primary_caen, caen_description, status, website, opportunity_score,
-        prospect_priority,
+        prospect_priority, legal_status, fiscal_status, commercial_evidence_status, is_calling_eligible,
         (SELECT COALESCE(normalized_value, contact_value) FROM contact_records WHERE cui = companies.cui AND (contact_type = 'MOBILE' OR contact_value LIKE '+407%' OR contact_value LIKE '07%') ORDER BY confidence_score DESC LIMIT 1) as mobile_contact,
         (SELECT source_name FROM contact_records WHERE cui = companies.cui AND (contact_type = 'MOBILE' OR contact_value LIKE '+407%' OR contact_value LIKE '07%') ORDER BY confidence_score DESC LIMIT 1) as mobile_source,
         (SELECT verification_status FROM contact_records WHERE cui = companies.cui AND (contact_type = 'MOBILE' OR contact_value LIKE '+407%' OR contact_value LIKE '07%') ORDER BY confidence_score DESC LIMIT 1) as mobile_status,
@@ -212,6 +223,7 @@ export async function GET(request: NextRequest) {
     const header = [
       'CUI', 'Denumire', 'Nr_RegCom', 'Forma_Juridica', 'Data_Inmatriculare',
       'Judet', 'Localitate', 'CAEN', 'Descriere_CAEN', 'Stare',
+      'Stare_Juridica_ONRC', 'Stare_Fiscala_ANAF', 'Evidenta_Activitate_Economica', 'Eligibil_Apelare',
       'Website', 'Mobil', 'Sursa_Mobil', 'Status_Verificare_Mobil',
       'Fix', 'Sursa_Fix', 'Status_Verificare_Fix', 'Email',
       'Stadiu_Pipeline', 'Data_Follow_Up', 'Oportunitati_Asigurare_Discutie', 'Ultimul_Rezultat_Apel',
@@ -231,6 +243,10 @@ export async function GET(request: NextRequest) {
         escapeCsv(r.primary_caen),
         escapeCsv(r.caen_description),
         escapeCsv(r.status),
+        escapeCsv(r.legal_status || 'UNKNOWN'),
+        escapeCsv(r.fiscal_status || 'UNKNOWN'),
+        escapeCsv(r.commercial_evidence_status || 'COMMERCIAL_ACTIVITY_UNKNOWN'),
+        r.is_calling_eligible === 1 ? 'DA' : 'NU',
         escapeCsv(r.website),
         escapeCsv(r.mobile_contact),
         escapeCsv(r.mobile_source),

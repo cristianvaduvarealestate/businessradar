@@ -7,6 +7,10 @@ export interface ScoringInput {
   street?: string;
   primaryCaen?: string;
   status?: string;
+  legalStatus?: string;
+  fiscalStatus?: string;
+  commercialEvidenceStatus?: string;
+  isCallingEligible?: boolean;
   vatRegistered?: number | boolean;
   hasFinancials?: boolean;
   financialHistoryYears?: number;
@@ -22,10 +26,12 @@ export interface ScoringInput {
   profitPrevious?: number;
 }
 
+export type ProspectPriority = 'EXCLUDED' | 'REVIEW' | 'MEDIUM' | 'HIGH' | 'URGENT' | 'STANDARD' | 'LOW';
+
 export interface ScoringResult {
   dataCompletenessScore: number; // 0 - 100
   opportunityScore: number;      // 0 - 100
-  prospectPriority: 'LOW' | 'STANDARD' | 'HIGH' | 'URGENT';
+  prospectPriority: ProspectPriority;
   financialTrend: 'GROWING' | 'STABLE' | 'DECLINING' | 'UNKNOWN';
   explanation: {
     completenessReasons: string[];
@@ -46,9 +52,9 @@ export function calculateCompanyScores(input: ScoringInput): ScoringResult {
   if (input.regCom) { completeness += 10; completenessReasons.push('Nr. Registrul Comerțului (+10%)'); }
   if (input.county && input.city) { completeness += 10; completenessReasons.push('Sediu geografic complet (+10%)'); }
   if (input.primaryCaen) { completeness += 15; completenessReasons.push('Obiect de activitate CAEN clasificat (+15%)'); }
-  if (input.status) { completeness += 10; completenessReasons.push('Stare juridică confirmată (+10%)'); }
-  if (input.vatRegistered !== undefined) { completeness += 10; completenessReasons.push('Statut fiscal ANAF verificat (+10%)'); }
-  if (input.hasFinancials) { completeness += 15; completenessReasons.push('Bilanț financiar depus (+15%)'); }
+  if (input.status || input.legalStatus) { completeness += 10; completenessReasons.push('Stare juridică confirmată (+10%)'); }
+  if (input.vatRegistered !== undefined || input.fiscalStatus) { completeness += 10; completenessReasons.push('Statut fiscal ANAF verificat (+10%)'); }
+  if (input.hasFinancials || input.commercialEvidenceStatus === 'ACTIVE_COMMERCIAL_EVIDENCE') { completeness += 15; completenessReasons.push('Bilanț financiar depus (+15%)'); }
   if (input.hasWebsite) { completeness += 5; completenessReasons.push('Website comercial validat (+5%)'); }
   if (input.hasEmail || input.hasPhone) { completeness += 5; completenessReasons.push('Date de contact identificate (+5%)'); }
 
@@ -83,16 +89,45 @@ export function calculateCompanyScores(input: ScoringInput): ScoringResult {
   oppScore = Math.min(oppScore, 100);
 
   // 3. Prospecting Priority
-  let priority: 'LOW' | 'STANDARD' | 'HIGH' | 'URGENT' = 'STANDARD';
-  if (urgentCount > 0 && (input.hasEmail || input.hasPhone)) {
+  let priority: ProspectPriority = 'STANDARD';
+
+  // Check exclusion first
+  const isExcluded =
+    input.isCallingEligible === false ||
+    input.legalStatus === 'RADIATED' ||
+    input.legalStatus === 'SUSPENDED' ||
+    input.legalStatus === 'DISSOLVED' ||
+    input.legalStatus === 'IN_LIQUIDATION' ||
+    input.fiscalStatus === 'FISCALLY_INACTIVE' ||
+    input.status === 'RADIATED' ||
+    input.status === 'DISSOLVED';
+
+  if (isExcluded) {
+    priority = 'EXCLUDED';
+    priorityReasons.push('Companie exclusă: statut juridic/fiscal neeligibil sau radiată');
+  } else if (
+    input.legalStatus === 'UNKNOWN' ||
+    input.fiscalStatus === 'UNKNOWN' ||
+    input.legalStatus === 'VERIFICATION_ERROR'
+  ) {
+    priority = 'REVIEW';
+    priorityReasons.push('Necesită verificare oficială suplimentară');
+  } else if (
+    urgentCount > 0 &&
+    (input.hasEmail || input.hasPhone) &&
+    input.commercialEvidenceStatus === 'ACTIVE_COMMERCIAL_EVIDENCE'
+  ) {
     priority = 'URGENT';
-    priorityReasons.push('Poliță cu obligativitate legală identificată și date de contact disponibile');
-  } else if (oppScore >= 70 || (input.isNewCompany && input.hasWebsite)) {
+    priorityReasons.push('Poliță urgentă/legală, activitate confirmată și contact disponibil');
+  } else if (
+    (oppScore >= 65 || (input.isNewCompany && input.hasPhone)) &&
+    (input.hasPhone || input.hasEmail)
+  ) {
     priority = 'HIGH';
-    priorityReasons.push('Scor ridicat de oportunitate sau companie nouă cu prezență web');
-  } else if (input.status === 'RADIATED' || input.status === 'DISSOLVED') {
-    priority = 'LOW';
-    priorityReasons.push('Compania este inactivă sau radiată');
+    priorityReasons.push('Eligibilă verificată, oportunități identificate și contact valid');
+  } else if (input.hasPhone || input.hasEmail) {
+    priority = 'MEDIUM';
+    priorityReasons.push('Eligibilă verificată cu date de contact standard');
   } else {
     priority = 'STANDARD';
     priorityReasons.push('Companie eligibilă pentru campanii periodice');

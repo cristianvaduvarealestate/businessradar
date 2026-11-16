@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { queryOne, queryAll } from '@/lib/db';
 import { getCategoriesForCaen, INDUSTRY_CATEGORIES } from '@/lib/caen';
 import { validateRequest } from '@/lib/auth';
+import { InsuranceIntelligenceService } from '@/lib/insurance/intelligence';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +38,15 @@ export async function GET(request: NextRequest) {
     const source = searchParams.get('source')?.trim() || '';
     const opportunity = searchParams.get('opportunity')?.trim() || '';
     const requiresCallback = searchParams.get('requiresCallback');
+
+    // Verification & Calling View Filters
+    const callingView = searchParams.get('callingView')?.trim() || '';
+    const eligibleOnly = searchParams.get('eligibleOnly');
+    const ineligibleOnly = searchParams.get('ineligibleOnly');
+    const legalStatus = searchParams.get('legalStatus')?.trim() || '';
+    const fiscalStatus = searchParams.get('fiscalStatus')?.trim() || '';
+    const commercialEvidence = searchParams.get('commercialEvidence')?.trim() || '';
+    const exclusionReason = searchParams.get('exclusionReason')?.trim() || '';
 
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(10, parseInt(searchParams.get('limit') || '25', 10)));
@@ -80,6 +90,33 @@ export async function GET(request: NextRequest) {
     if (status) {
       whereClauses.push('status = ?');
       params.push(status);
+    }
+
+    // Calling View (Eligible vs Excluded)
+    if (callingView === 'eligible' || eligibleOnly === 'true') {
+      whereClauses.push('is_calling_eligible = 1');
+    } else if (callingView === 'excluded' || ineligibleOnly === 'true') {
+      whereClauses.push('is_calling_eligible = 0');
+    }
+
+    if (legalStatus) {
+      whereClauses.push('legal_status = ?');
+      params.push(legalStatus);
+    }
+
+    if (fiscalStatus) {
+      whereClauses.push('fiscal_status = ?');
+      params.push(fiscalStatus);
+    }
+
+    if (commercialEvidence) {
+      whereClauses.push('commercial_evidence_status = ?');
+      params.push(commercialEvidence);
+    }
+
+    if (exclusionReason) {
+      whereClauses.push('ineligibility_reasons LIKE ?');
+      params.push(`%${exclusionReason}%`);
     }
 
     if (stage) {
@@ -160,16 +197,21 @@ export async function GET(request: NextRequest) {
     // Sorting
     const sortField = searchParams.get('sort') || 'opportunity_score';
     const sortOrder = searchParams.get('order')?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-    const allowedSortFields = ['opportunity_score', 'first_observed_at', 'name'];
+    const allowedSortFields = ['opportunity_score', 'first_observed_at', 'name', 'turnover', 'employees_avg'];
     const safeSort = allowedSortFields.includes(sortField) ? sortField : 'opportunity_score';
 
-    // Query Data
+    // Query Data with verification columns
     const querySql = `
       SELECT 
         id, cui, name, normalized_name, reg_com, legal_form, incorporation_date,
         country, county, city, primary_caen, caen_description, status,
         website, first_observed_at, last_observed_at, data_completeness_score,
         opportunity_score, financial_trend, prospect_priority,
+        legal_status, legal_status_desc, legal_status_date,
+        fiscal_status, fiscal_inactivation_date, fiscal_reactivation_date,
+        ro_e_factura, commercial_evidence_status,
+        latest_financial_year, turnover, employees_avg, net_profit, net_loss,
+        is_calling_eligible, ineligibility_reasons, last_status_check_at, status_verification_source,
         (SELECT pp.status FROM prospect_pipeline pp WHERE pp.cui = companies.cui) as crm_status,
         (SELECT pp.next_follow_up_date FROM prospect_pipeline pp WHERE pp.cui = companies.cui) as next_follow_up_date,
         (SELECT COUNT(*) FROM contact_records cr WHERE cr.cui = companies.cui) as contact_count,
@@ -201,10 +243,21 @@ export async function GET(request: NextRequest) {
 
     const items = await queryAll(querySql, [...params, limit, offset]);
 
-    // Enrich with categories
+    // Enrich with categories and insurance intelligence briefing
     const enrichedItems = items.map((c: any) => ({
       ...c,
       categories: getCategoriesForCaen(c.primary_caen),
+      insurance_briefing: InsuranceIntelligenceService.generateBriefing({
+        cui: c.cui,
+        name: c.name,
+        primaryCaen: c.primary_caen,
+        caenDescription: c.caen_description,
+        legalStatus: c.legal_status,
+        fiscalStatus: c.fiscal_status,
+        employeesAvg: c.employees_avg,
+        turnover: c.turnover,
+        latestFinancialYear: c.latest_financial_year,
+      }),
     }));
 
     return NextResponse.json(

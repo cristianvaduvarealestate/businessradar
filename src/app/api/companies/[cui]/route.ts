@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { queryOne, queryAll } from '@/lib/db';
 import { getCategoriesForCaen } from '@/lib/caen';
 import { validateRequest } from '@/lib/auth';
+import { InsuranceIntelligenceService } from '@/lib/insurance/intelligence';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +40,18 @@ export async function GET(
     const secondaryCaens = await queryAll('SELECT * FROM company_secondary_caen WHERE cui = ?', [cui]);
     const isSuppressed = await queryOne('SELECT * FROM suppression_list WHERE cui = ?', [cui]);
 
+    const insuranceBriefing = InsuranceIntelligenceService.generateBriefing({
+      cui: company.cui,
+      name: company.name,
+      primaryCaen: company.primary_caen,
+      caenDescription: company.caen_description,
+      legalStatus: company.legal_status,
+      fiscalStatus: company.fiscal_status,
+      employeesAvg: company.employees_avg,
+      turnover: company.turnover,
+      latestFinancialYear: company.latest_financial_year,
+    });
+
     return NextResponse.json(
       {
         success: true,
@@ -53,8 +66,9 @@ export async function GET(
           followUps,
           statusHistory,
           secondaryCaens,
+          categories: getCategoriesForCaen(company.primary_caen),
           isSuppressed: !!isSuppressed,
-          categories: getCategoriesForCaen(company.primary_caen || ''),
+          insuranceBriefing,
         },
       },
       {
