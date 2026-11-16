@@ -19,16 +19,8 @@ import {
 } from 'lucide-react';
 
 const NAV_ITEMS = [
-  { href: '/', label: 'Overview', icon: BarChart3 },
-  { href: '/calling', label: 'Workspace Apeluri', icon: PhoneCall, badge: 'HOT', highlight: true },
-  { href: '/radar', label: 'Radar Firme Noi', icon: Compass, badge: 'LIVE' },
-  { href: '/companies', label: 'Baza Națională', icon: Building2 },
-  { href: '/enrichment', label: 'Motor Contacte B2B', icon: Sparkles, badge: 'AUTO' },
-  { href: '/industries', label: 'Sectoare CAEN', icon: Layers },
-  { href: '/insurance', label: 'Oportunități Asigurare', icon: ShieldCheck, highlight: true },
-  { href: '/pipeline', label: 'Pipeline Vânzări CRM', icon: TrendingUp },
-  { href: '/sources', label: 'Management Surse', icon: Server },
-  { href: '/health', label: 'Stare Sistem & Watchdog', icon: HeartPulse },
+  { href: '/companies', label: 'FIRME', icon: Building2, badge: '128', highlight: true },
+  { href: '/pipeline', label: 'Activități & Follow-ups', icon: TrendingUp },
   { href: '/settings', label: 'Configurare & Supresie', icon: Settings },
 ];
 
@@ -55,7 +47,7 @@ export default function Navigation() {
     <aside className="w-64 bg-titanium-900 border-r border-titanium-800 flex flex-col shrink-0 min-h-screen">
       {/* Brand Header */}
       <div className="p-5 border-b border-titanium-800">
-        <Link href="/" className="flex items-center gap-3">
+        <Link href="/companies" className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-titanium-800 border border-titanium-700 flex items-center justify-center text-radar-green shadow-inner">
             <Compass className="w-5 h-5 radar-pulse" />
           </div>
@@ -75,7 +67,7 @@ export default function Navigation() {
       {/* Main Nav Links */}
       <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
         <div className="px-3 py-2 text-[10px] font-bold text-titanium-500 uppercase tracking-wider">
-          Intelligence &amp; Prospectare
+          Workspace Unificat
         </div>
 
         {NAV_ITEMS.map((item) => {

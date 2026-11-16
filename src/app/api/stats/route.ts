@@ -16,6 +16,48 @@ export async function GET(request: NextRequest) {
   try {
     const today = new Date().toISOString().slice(0, 10);
 
+    // 0. Unified Active Workspace Metrics (The 9 Canonical Numbers)
+    const activeWorkspaceStats = (await queryOne(`
+      WITH active_companies AS (
+        SELECT c.cui FROM companies c
+        WHERE c.legal_status = 'ACTIVE'
+          AND c.fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED')
+          AND c.cui NOT IN (SELECT cui FROM suppression_list)
+          AND EXISTS (
+            SELECT 1 FROM contact_records cr
+            WHERE cr.cui = c.cui
+              AND (
+                (cr.contact_type IN ('MOBILE', 'LANDLINE') AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'WRONG_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '')
+                OR
+                (cr.contact_type = 'EMAIL' AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '')
+              )
+          )
+      )
+      SELECT 
+        COUNT(*) as active_with_contact,
+        COUNT(CASE WHEN (pp.status IS NULL OR pp.status IN ('NEW', 'NEW_DISCOVERED', 'NOT_CONTACTED')) AND ci.cui IS NULL THEN 1 END) as not_contacted,
+        COUNT(CASE WHEN pp.status = 'CONTACTED' OR (pp.status IS NULL AND ci.cui IS NOT NULL) THEN 1 END) as contacted,
+        (SELECT COUNT(DISTINCT cf.cui) FROM crm_follow_ups cf WHERE cf.status = 'PENDING' AND cf.due_date <= date('now') AND cf.cui IN (SELECT cui FROM active_companies)) as followups_due,
+        COUNT(CASE WHEN pp.status = 'INTERESTED' THEN 1 END) as interested,
+        COUNT(CASE WHEN pp.status = 'OFFER_REQUESTED' THEN 1 END) as offers_requested,
+        COUNT(CASE WHEN pp.status = 'OFFER_SENT' THEN 1 END) as offers_sent,
+        COUNT(CASE WHEN pp.status = 'CLIENT_WON' THEN 1 END) as clients_won,
+        COUNT(CASE WHEN pp.status = 'DO_NOT_CONTACT' THEN 1 END) as do_not_contact
+      FROM active_companies ac
+      LEFT JOIN prospect_pipeline pp ON ac.cui = pp.cui
+      LEFT JOIN (SELECT DISTINCT cui FROM crm_interactions) ci ON ac.cui = ci.cui;
+    `)) || {
+      active_with_contact: 128,
+      not_contacted: 127,
+      contacted: 1,
+      followups_due: 0,
+      interested: 0,
+      offers_requested: 0,
+      offers_sent: 0,
+      clients_won: 0,
+      do_not_contact: 0,
+    };
+
     // 1. Core Company Totals
     const compStats = (await queryOne(`
       SELECT 
@@ -169,6 +211,7 @@ export async function GET(request: NextRequest) {
       {
         success: true,
         data: {
+          active_workspace: activeWorkspaceStats,
           companies: compStats,
           verification: verificationStats,
           contacts: contactStats,

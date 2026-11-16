@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
     const requiresCallback = searchParams.get('requiresCallback');
 
     // Verification & Calling View Filters
+    const view = searchParams.get('view')?.trim() || '';
     const callingView = searchParams.get('callingView')?.trim() || '';
     const eligibleOnly = searchParams.get('eligibleOnly');
     const ineligibleOnly = searchParams.get('ineligibleOnly');
@@ -47,6 +48,8 @@ export async function GET(request: NextRequest) {
     const fiscalStatus = searchParams.get('fiscalStatus')?.trim() || '';
     const commercialEvidence = searchParams.get('commercialEvidence')?.trim() || '';
     const exclusionReason = searchParams.get('exclusionReason')?.trim() || '';
+    const crmStatus = searchParams.get('crmStatus')?.trim() || searchParams.get('crm_status')?.trim() || '';
+    const hasDueFollowup = searchParams.get('hasDueFollowup');
 
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(10, parseInt(searchParams.get('limit') || '25', 10)));
@@ -92,19 +95,47 @@ export async function GET(request: NextRequest) {
       params.push(status);
     }
 
-    // Calling View (Eligible vs Segmented Review Queues)
-    if (callingView === 'eligible' || eligibleOnly === 'true') {
-      whereClauses.push('is_calling_eligible = 1');
+    // Primary Workspace View Filter (Active Workspace vs Secondary Views)
+    if (view === 'all' || callingView === 'all') {
+      // Secondary view: all companies without default active filter
+    } else if (view === 'excluded' || callingView === 'excluded' || ineligibleOnly === 'true') {
+      // Secondary view: excluded / ineligible companies
+      whereClauses.push("(legal_status IN ('RADIATED', 'SUSPENDED', 'DISSOLVED', 'IN_LIQUIDATION', 'VERIFICATION_ERROR') OR fiscal_status = 'FISCALLY_INACTIVE' OR cui IN (SELECT cui FROM suppression_list) OR (legal_status = 'ACTIVE' AND fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED') AND NOT EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND ((cr.contact_type IN ('MOBILE', 'LANDLINE') AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'WRONG_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '') OR (cr.contact_type = 'EMAIL' AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '')))))");
+    } else if (view === 'unverified' || callingView === 'needs_verification') {
+      // Secondary view: unverified legal status companies
+      whereClauses.push("legal_status = 'UNKNOWN'");
     } else if (callingView === 'unconfirmed_commercial') {
       whereClauses.push("commercial_evidence_status IN ('NO_FINANCIAL_EVIDENCE', 'LIMITED_COMMERCIAL_EVIDENCE', 'HISTORICAL_ACTIVITY_ONLY', 'COMMERCIAL_ACTIVITY_UNKNOWN') AND legal_status = 'ACTIVE' AND fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED')");
     } else if (callingView === 'new_companies') {
       whereClauses.push("commercial_evidence_status = 'NEW_COMPANY' AND legal_status = 'ACTIVE'");
-    } else if (callingView === 'needs_verification') {
-      whereClauses.push("(legal_status = 'UNKNOWN' OR onrc_status = 'ONRC_UNVERIFIED') AND legal_status NOT IN ('RADIATED', 'SUSPENDED', 'DISSOLVED', 'IN_LIQUIDATION')");
     } else if (callingView === 'unverified_contacts') {
       whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND cr.verification_status IN ('WRONG_NUMBER', 'INVALID_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED', 'FORMAT_VALID_ONLY', 'UNVERIFIED'))");
-    } else if (callingView === 'excluded' || ineligibleOnly === 'true') {
-      whereClauses.push("is_calling_eligible = 0 AND (legal_status IN ('RADIATED', 'SUSPENDED', 'DISSOLVED', 'IN_LIQUIDATION') OR fiscal_status = 'FISCALLY_INACTIVE' OR ineligibility_reasons LIKE '%suprimare%')");
+    } else {
+      // DEFAULT ACTIVE WORKSPACE: Exactly active companies with usable contact channels
+      whereClauses.push("legal_status = 'ACTIVE'");
+      whereClauses.push("fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED')");
+      whereClauses.push("cui NOT IN (SELECT cui FROM suppression_list)");
+      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND ((cr.contact_type IN ('MOBILE', 'LANDLINE') AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'WRONG_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '') OR (cr.contact_type = 'EMAIL' AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '')))");
+    }
+
+    // CRM Status & Follow-up filters
+    if (crmStatus) {
+      if (crmStatus === 'NOT_CONTACTED') {
+        whereClauses.push("((SELECT pp.status FROM prospect_pipeline pp WHERE pp.cui = companies.cui) IN ('NEW', 'NEW_DISCOVERED', 'NOT_CONTACTED') OR ((SELECT pp.status FROM prospect_pipeline pp WHERE pp.cui = companies.cui) IS NULL AND NOT EXISTS (SELECT 1 FROM crm_interactions ci WHERE ci.cui = companies.cui)))");
+      } else if (crmStatus === 'CONTACTED') {
+        whereClauses.push("((SELECT pp.status FROM prospect_pipeline pp WHERE pp.cui = companies.cui) = 'CONTACTED' OR EXISTS (SELECT 1 FROM crm_interactions ci WHERE ci.cui = companies.cui))");
+      } else if (crmStatus === 'FOLLOWUP_DUE') {
+        whereClauses.push("EXISTS (SELECT 1 FROM crm_follow_ups cf WHERE cf.cui = companies.cui AND cf.status = 'PENDING' AND cf.due_date <= date('now'))");
+      } else if (crmStatus === 'DO_NOT_CONTACT') {
+        whereClauses.push("((SELECT pp.status FROM prospect_pipeline pp WHERE pp.cui = companies.cui) = 'DO_NOT_CONTACT' OR cui IN (SELECT cui FROM suppression_list))");
+      } else {
+        whereClauses.push("(SELECT pp.status FROM prospect_pipeline pp WHERE pp.cui = companies.cui) = ?");
+        params.push(crmStatus);
+      }
+    }
+
+    if (hasDueFollowup === 'true') {
+      whereClauses.push("EXISTS (SELECT 1 FROM crm_follow_ups cf WHERE cf.cui = companies.cui AND cf.status = 'PENDING' AND cf.due_date <= date('now'))");
     }
 
     if (legalStatus) {

@@ -143,7 +143,17 @@ export async function POST(request: NextRequest) {
     }
 
     // 4. Manual verification action: preserve original source, update verification status
-    if (verify_contact && contact_value) {
+    if (outcome === 'WRONG_NUMBER' && contact_value) {
+      await executeRun(
+        `UPDATE contact_records 
+         SET verification_status = 'WRONG_NUMBER',
+             confidence_score = 0.0,
+             last_checked_at = datetime('now'),
+             notes = COALESCE(notes || '; ', '') || 'Număr greșit raportat la apel de ' || ?
+         WHERE cui = ? AND (contact_value = ? OR normalized_value = ?)`,
+        [user, Number(cui), contact_value, contact_value]
+      );
+    } else if (verify_contact && contact_value) {
       await executeRun(
         `UPDATE contact_records 
          SET verification_status = 'MANUALLY_CONFIRMED',

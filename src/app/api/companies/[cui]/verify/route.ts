@@ -19,7 +19,7 @@ export async function POST(
   }
 
   const cui = parseInt(params.cui, 10);
-  if (isNaN(cui)) {
+  if (isNaN(cui) || cui <= 0) {
     return NextResponse.json({ success: false, error: 'CUI invalid' }, { status: 400 });
   }
 
@@ -43,14 +43,40 @@ export async function POST(
       providerError = true;
     }
 
+    const nowIso = new Date().toISOString();
+
+    // If provider error occurred, do not corrupt or overwrite valid existing company statuses
+    if (providerError) {
+      await executeRun(
+        `INSERT INTO company_status_evidence (
+          cui, source_name, source_url, query_timestamp, response_timestamp,
+          status_returned, effective_date, verification_method, raw_response_ref,
+          last_successful_verification, next_verification_due, provider_error, verified_by
+        ) VALUES (?, 'ANAF_PLATITOR_TVA_REST_V9', 'https://webservicesp.anaf.ro/api/PlatitorTvaRest/v9/tva',
+                  ?, ?, 'ERROR:PROVIDER_UNAVAILABLE', NULL, 'OFFICIAL_SYNCHRONOUS_REST_API', 'ANAF_CONNECTION_FAILED',
+                  ?, ?, 'CONNECTION_FAILED', ?)`,
+        [
+          cui,
+          nowIso,
+          nowIso,
+          company.last_status_check_at,
+          new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+          typeof auth.user === 'string' ? auth.user : 'ADMIN_MANUAL',
+        ]
+      );
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Serviciul ANAF este temporar indisponibil',
+          message: 'Cererea către serverul ANAF v9 a întâmpinat o eroare de conexiune. Statutul companiei din baza de date a fost conservat.',
+        },
+        { status: 502 }
+      );
+    }
+
     // 2. Parse Legal Status
     let legalStatusResult;
-    if (providerError) {
-      legalStatusResult = {
-        status: 'VERIFICATION_ERROR' as const,
-        description: 'Eroare conexiune serviciu ANAF/ONRC',
-      };
-    } else if (anafItem) {
+    if (anafItem) {
       legalStatusResult = CompanyVerificationService.parseLegalStatus(anafItem.stare_inregistrare);
     } else {
       legalStatusResult = {
@@ -61,11 +87,7 @@ export async function POST(
 
     // 3. Parse Fiscal Status
     let fiscalStatusResult;
-    if (providerError) {
-      fiscalStatusResult = {
-        status: 'VERIFICATION_ERROR' as const,
-      };
-    } else if (anafItem) {
+    if (anafItem) {
       fiscalStatusResult = CompanyVerificationService.parseFiscalStatus({
         statusInactivi: anafItem.statusInactivi,
         dataInactivare: anafItem.dataInactivare,
@@ -130,7 +152,6 @@ export async function POST(
     );
 
     // 8. Central Eligibility Decision
-    const nowIso = new Date().toISOString();
     const eligibility = CompanyVerificationService.evaluateCompanyEligibility({
       legalStatus: legalStatusResult.status,
       fiscalStatus: fiscalStatusResult.status,

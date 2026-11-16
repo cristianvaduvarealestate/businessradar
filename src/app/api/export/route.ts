@@ -151,12 +151,22 @@ export async function GET(request: NextRequest) {
     ];
     const params: any[] = [];
 
+    const view = searchParams.get('view')?.trim() || '';
     const eligibleOnly = searchParams.get('eligibleOnly');
     const legalStatus = searchParams.get('legalStatus');
     const fiscalStatus = searchParams.get('fiscalStatus');
 
-    if (eligibleOnly === 'true') {
-      whereClauses.push('is_calling_eligible = 1');
+    if (view === 'all') {
+      // export all without active restriction
+    } else if (view === 'excluded') {
+      whereClauses.push("(legal_status IN ('RADIATED', 'SUSPENDED', 'DISSOLVED', 'IN_LIQUIDATION', 'VERIFICATION_ERROR') OR fiscal_status = 'FISCALLY_INACTIVE')");
+    } else if (view === 'unverified') {
+      whereClauses.push("legal_status = 'UNKNOWN'");
+    } else {
+      // Default: Active companies with usable contact
+      whereClauses.push("legal_status = 'ACTIVE'");
+      whereClauses.push("fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED')");
+      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND ((cr.contact_type IN ('MOBILE', 'LANDLINE') AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'WRONG_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '') OR (cr.contact_type = 'EMAIL' AND cr.verification_status NOT IN ('UNREACHABLE', 'INVALID', 'CONFIRMED_INVALID', 'OUTDATED') AND cr.contact_value IS NOT NULL AND trim(cr.contact_value) != '')))");
     }
     if (legalStatus) {
       whereClauses.push('legal_status = ?');
