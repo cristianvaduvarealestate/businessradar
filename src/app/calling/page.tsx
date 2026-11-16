@@ -57,13 +57,38 @@ function CallingWorkspaceContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<'eligible' | 'excluded'>(
-    searchParams?.get('tab') === 'excluded' ? 'excluded' : 'eligible'
+  type CallingTab =
+    | 'eligible'
+    | 'unconfirmed_commercial'
+    | 'new_companies'
+    | 'needs_verification'
+    | 'unverified_contacts'
+    | 'excluded';
+
+  const [activeTab, setActiveTab] = useState<CallingTab>(
+    (searchParams?.get('tab') as CallingTab) || 'eligible'
   );
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<any>(null);
   const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0, totalPages: 1 });
+
+  // Modals for ONRC & Financials
+  const [onrcModalCompany, setOnrcModalCompany] = useState<any | null>(null);
+  const [onrcForm, setOnrcForm] = useState({ onrcStatus: 'ONRC_ACTIVE', resolutionDate: '', notes: '' });
+  const [submittingOnrc, setSubmittingOnrc] = useState(false);
+
+  const [financialModalCompany, setFinancialModalCompany] = useState<any | null>(null);
+  const [financialForm, setFinancialForm] = useState({
+    fiscalYear: '2023',
+    turnover: '',
+    employeesAvg: '',
+    netProfit: '',
+    netLoss: '',
+    sourceUrl: 'https://mfinante.gov.ro',
+    notes: '',
+  });
+  const [submittingFinancial, setSubmittingFinancial] = useState(false);
 
   // Filters
   const [query, setQuery] = useState(searchParams?.get('q') || '');
@@ -122,11 +147,9 @@ function CallingWorkspaceContent() {
         limit: '25',
       });
 
-      // Tab control: Eligible active prospects vs Excluded review list
-      if (activeTab === 'eligible') {
-        params.set('callingView', 'eligible');
-      } else {
-        params.set('callingView', 'excluded');
+      // Tab control: Segmented Calling & Qualification Queues
+      params.set('callingView', activeTab);
+      if (activeTab === 'excluded') {
         if (excludedFilter === 'radiated') params.set('legalStatus', 'RADIATED');
         else if (excludedFilter === 'inactive') params.set('fiscalStatus', 'FISCALLY_INACTIVE');
         else if (excludedFilter === 'suspended') params.set('legalStatus', 'SUSPENDED');
@@ -328,6 +351,60 @@ function CallingWorkspaceContent() {
       alert(err.message || 'Eroare rețea');
     } finally {
       setSubmittingOutcome(false);
+    }
+  };
+
+  const submitOnrcVerification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onrcModalCompany) return;
+    setSubmittingOnrc(true);
+    try {
+      const res = await fetch(`/api/companies/${onrcModalCompany.cui}/verify-onrc`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(onrcForm),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setItems((prev) =>
+          prev.map((c) => (c.cui === onrcModalCompany.cui ? { ...c, ...json.data.company } : c))
+        );
+        setOnrcModalCompany(null);
+        fetchStats();
+      } else {
+        alert(json.error || 'Eroare la salvare verificare ONRC.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Eroare rețea');
+    } finally {
+      setSubmittingOnrc(false);
+    }
+  };
+
+  const submitFinancialRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!financialModalCompany) return;
+    setSubmittingFinancial(true);
+    try {
+      const res = await fetch(`/api/companies/${financialModalCompany.cui}/financials`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(financialForm),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setItems((prev) =>
+          prev.map((c) => (c.cui === financialModalCompany.cui ? { ...c, ...json.data.company } : c))
+        );
+        setFinancialModalCompany(null);
+        fetchStats();
+      } else {
+        alert(json.error || 'Eroare la salvare date financiare.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Eroare rețea');
+    } finally {
+      setSubmittingFinancial(false);
     }
   };
 
@@ -598,37 +675,94 @@ function CallingWorkspaceContent() {
       </div>
 
       {/* Primary Work View Tabs */}
-      <div className="flex items-center gap-3 border-b border-titanium-800 pb-1">
+      <div className="flex items-center gap-2 border-b border-titanium-800 pb-1 overflow-x-auto">
         <button
           onClick={() => {
             setActiveTab('eligible');
             setExcludedFilter('all');
           }}
-          className={`pb-2.5 px-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-all ${
+          className={`pb-2.5 px-3 text-xs sm:text-sm font-bold flex items-center gap-1.5 border-b-2 whitespace-nowrap transition-all ${
             activeTab === 'eligible'
               ? 'border-radar-green text-radar-green'
               : 'border-transparent text-titanium-400 hover:text-titanium-200'
           }`}
         >
           <BadgeCheck className="w-4 h-4" />
-          <span>Prospecte Active Eligibile</span>
+          <span>Prospecte Eligibile</span>
           <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-emerald-500/20 text-emerald-400">
-            {vStats.calling_eligible ?? 128}
+            {vStats.calling_eligible ?? 0}
           </span>
         </button>
 
         <button
-          onClick={() => setActiveTab('excluded')}
-          className={`pb-2.5 px-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-all ${
+          onClick={() => {
+            setActiveTab('unconfirmed_commercial');
+            setExcludedFilter('all');
+          }}
+          className={`pb-2.5 px-3 text-xs sm:text-sm font-bold flex items-center gap-1.5 border-b-2 whitespace-nowrap transition-all ${
+            activeTab === 'unconfirmed_commercial'
+              ? 'border-amber-500 text-amber-400'
+              : 'border-transparent text-titanium-400 hover:text-titanium-200'
+          }`}
+        >
+          <AlertTriangle className="w-4 h-4" />
+          <span>Activitate Neconfirmată (Fără Bilanț)</span>
+          <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-amber-500/20 text-amber-400">
+            {vStats.no_financial_evidence ?? 0}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('new_companies');
+            setExcludedFilter('all');
+          }}
+          className={`pb-2.5 px-3 text-xs sm:text-sm font-bold flex items-center gap-1.5 border-b-2 whitespace-nowrap transition-all ${
+            activeTab === 'new_companies'
+              ? 'border-teal-500 text-teal-400'
+              : 'border-transparent text-titanium-400 hover:text-titanium-200'
+          }`}
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>Companii Noi (Startups)</span>
+          <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-teal-500/20 text-teal-400">
+            {vStats.new_company ?? 1}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('needs_verification');
+            setExcludedFilter('all');
+          }}
+          className={`pb-2.5 px-3 text-xs sm:text-sm font-bold flex items-center gap-1.5 border-b-2 whitespace-nowrap transition-all ${
+            activeTab === 'needs_verification'
+              ? 'border-blue-500 text-blue-400'
+              : 'border-transparent text-titanium-400 hover:text-titanium-200'
+          }`}
+        >
+          <HelpCircle className="w-4 h-4" />
+          <span>Necesită Verificare ONRC/ANAF</span>
+          <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-blue-500/20 text-blue-400">
+            {vStats.legal_unknown ?? 0}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('excluded');
+            setExcludedFilter('all');
+          }}
+          className={`pb-2.5 px-3 text-xs sm:text-sm font-bold flex items-center gap-1.5 border-b-2 whitespace-nowrap transition-all ${
             activeTab === 'excluded'
               ? 'border-rose-500 text-rose-400'
               : 'border-transparent text-titanium-400 hover:text-titanium-200'
           }`}
         >
           <XCircle className="w-4 h-4" />
-          <span>Companii Excluse / Revizuire</span>
+          <span>Companii Excluse</span>
           <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-rose-500/20 text-rose-400">
-            {vStats.calling_excluded ?? 297}
+            {vStats.calling_excluded ?? 0}
           </span>
         </button>
       </div>
@@ -886,8 +1020,45 @@ function CallingWorkspaceContent() {
                       className="px-2.5 py-1 rounded-lg bg-titanium-800 hover:bg-titanium-750 text-titanium-300 border border-titanium-700 text-xs font-semibold flex items-center gap-1.5 transition-all"
                     >
                       <RefreshCw className={`w-3 h-3 ${verifyingCui === company.cui ? 'animate-spin text-radar-green' : ''}`} />
-                      <span>{verifyingCui === company.cui ? 'Se verifică...' : 'Verifică acum'}</span>
+                      <span>{verifyingCui === company.cui ? 'Se verifică...' : 'Verifică ANAF'}</span>
                     </button>
+
+                    <button
+                      onClick={() => {
+                        setOnrcModalCompany(company);
+                        setOnrcForm({
+                          onrcStatus: company.onrc_status || 'ONRC_ACTIVE',
+                          resolutionDate: company.onrc_status_date || '',
+                          notes: company.onrc_verification_notes || '',
+                        });
+                      }}
+                      title="Verificare manuală în Registrul Comerțului (RECOM)"
+                      className="px-2.5 py-1 rounded-lg bg-titanium-800 hover:bg-titanium-750 text-blue-300 border border-blue-500/40 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                    >
+                      <ShieldCheck className="w-3 h-3 text-blue-400" />
+                      <span>ONRC Manual</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setFinancialModalCompany(company);
+                        setFinancialForm({
+                          fiscalYear: String(company.latest_financial_year || 2023),
+                          turnover: company.turnover ? String(company.turnover) : '',
+                          employeesAvg: company.employees_avg !== undefined && company.employees_avg !== null ? String(company.employees_avg) : '',
+                          netProfit: company.net_profit ? String(company.net_profit) : '',
+                          netLoss: company.net_loss ? String(company.net_loss) : '',
+                          sourceUrl: company.financial_source || 'https://mfinante.gov.ro',
+                          notes: company.financial_notes || '',
+                        });
+                      }}
+                      title="Actualizează datele bilanțului anual oficial"
+                      className="px-2.5 py-1 rounded-lg bg-titanium-800 hover:bg-titanium-750 text-amber-300 border border-amber-500/40 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                    >
+                      <FileSpreadsheet className="w-3 h-3 text-amber-400" />
+                      <span>Bilanț Financiar</span>
+                    </button>
+
                     {company.crm_status && (
                       <span className="px-2.5 py-1 rounded text-xs font-bold bg-titanium-800 text-titanium-200 border border-titanium-700">
                         {company.crm_status}
@@ -1153,6 +1324,218 @@ function CallingWorkspaceContent() {
               <span>Următor</span>
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ONRC Manual Verification Modal */}
+      {onrcModalCompany && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-titanium-900 border border-blue-500/50 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-titanium-800 pb-3">
+              <div>
+                <div className="text-[10px] font-bold text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                  Verificare Manuală Registrul Comerțului (RECOM)
+                </div>
+                <h3 className="text-base font-extrabold text-titanium-100">{onrcModalCompany.name}</h3>
+                <div className="text-xs text-titanium-400 font-mono">CUI: {onrcModalCompany.cui} {onrcModalCompany.reg_com ? `• ${onrcModalCompany.reg_com}` : ''}</div>
+              </div>
+              <button onClick={() => setOnrcModalCompany(null)} className="p-1 rounded-lg text-titanium-400 hover:text-titanium-100">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={submitOnrcVerification} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-titanium-300 mb-1.5">
+                  Stare constatată în RECOM / Portal ONRC:
+                </label>
+                <select
+                  value={onrcForm.onrcStatus}
+                  onChange={(e) => setOnrcForm({ ...onrcForm, onrcStatus: e.target.value })}
+                  className="w-full px-3 py-2 bg-titanium-950 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="ONRC_ACTIVE">ACTIVĂ — Înregistrată / În funcțiune</option>
+                  <option value="ONRC_RADIATED">RADIATĂ — Radiere definitivă din Registru</option>
+                  <option value="ONRC_SUSPENDED">SUSPENDATĂ — Activitate temporar întreruptă</option>
+                  <option value="ONRC_DISSOLVED">DIZOLVATĂ — Procedură de dizolvare</option>
+                  <option value="ONRC_IN_LIQUIDATION">ÎN LICHIDARE / INSOLVENȚĂ</option>
+                  <option value="ONRC_UNVERIFIED">NEVERIFICATĂ — Fără dovadă RECOM</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-titanium-300 mb-1">
+                  Dată rezoluție / mențiune ONRC:
+                </label>
+                <input
+                  type="date"
+                  value={onrcForm.resolutionDate}
+                  onChange={(e) => setOnrcForm({ ...onrcForm, resolutionDate: e.target.value })}
+                  className="w-full px-3 py-1.5 bg-titanium-950 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-titanium-300 mb-1">
+                  Notițe verificare / Număr certificat constatator:
+                </label>
+                <textarea
+                  rows={3}
+                  value={onrcForm.notes}
+                  onChange={(e) => setOnrcForm({ ...onrcForm, notes: e.target.value })}
+                  placeholder="ex: Verificat pe portal.onrc.ro. Certificat constatator nr. 1245 din 16.11.2026..."
+                  className="w-full px-3 py-2 bg-titanium-950 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-titanium-800">
+                <button
+                  type="button"
+                  onClick={() => setOnrcModalCompany(null)}
+                  className="px-4 py-2 rounded-lg bg-titanium-800 hover:bg-titanium-750 text-titanium-300 text-xs font-medium"
+                >
+                  Anulează
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingOnrc}
+                  className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {submittingOnrc && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Salvează Verificare ONRC</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Financial Statement Update Modal */}
+      {financialModalCompany && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-titanium-900 border border-amber-500/50 rounded-2xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-titanium-800 pb-3">
+              <div>
+                <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-amber-400" />
+                  Actualizare Bilanț Financiar (Ministerul Finanțelor)
+                </div>
+                <h3 className="text-base font-extrabold text-titanium-100">{financialModalCompany.name}</h3>
+                <div className="text-xs text-titanium-400 font-mono">CUI: {financialModalCompany.cui}</div>
+              </div>
+              <button onClick={() => setFinancialModalCompany(null)} className="p-1 rounded-lg text-titanium-400 hover:text-titanium-100">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={submitFinancialRecord} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-titanium-300 mb-1">
+                    Anul Raportării:
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={2000}
+                    max={2030}
+                    value={financialForm.fiscalYear}
+                    onChange={(e) => setFinancialForm({ ...financialForm, fiscalYear: e.target.value })}
+                    className="w-full px-3 py-1.5 bg-titanium-950 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-titanium-300 mb-1">
+                    Număr mediu salariați:
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={financialForm.employeesAvg}
+                    onChange={(e) => setFinancialForm({ ...financialForm, employeesAvg: e.target.value })}
+                    placeholder="ex: 12"
+                    className="w-full px-3 py-1.5 bg-titanium-950 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-titanium-300 mb-1">
+                    Cifră de Afaceri Netă (RON):
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={financialForm.turnover}
+                    onChange={(e) => setFinancialForm({ ...financialForm, turnover: e.target.value })}
+                    placeholder="ex: 1500000"
+                    className="w-full px-3 py-1.5 bg-titanium-950 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-titanium-300 mb-1">
+                    Profit Net (RON):
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={financialForm.netProfit}
+                    onChange={(e) => setFinancialForm({ ...financialForm, netProfit: e.target.value })}
+                    placeholder="ex: 240000"
+                    className="w-full px-3 py-1.5 bg-titanium-950 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-titanium-300 mb-1">
+                  Sursă / Document Oficial (URL sau descriere):
+                </label>
+                <input
+                  type="text"
+                  value={financialForm.sourceUrl}
+                  onChange={(e) => setFinancialForm({ ...financialForm, sourceUrl: e.target.value })}
+                  placeholder="https://mfinante.gov.ro / Raportare Anuală"
+                  className="w-full px-3 py-1.5 bg-titanium-950 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-titanium-300 mb-1">
+                  Notițe:
+                </label>
+                <textarea
+                  rows={2}
+                  value={financialForm.notes}
+                  onChange={(e) => setFinancialForm({ ...financialForm, notes: e.target.value })}
+                  placeholder="ex: Preluate din bilanțul depus la ANAF pentru exercițiul financiar încheiat..."
+                  className="w-full px-3 py-2 bg-titanium-950 border border-titanium-700 rounded-lg text-xs text-titanium-100 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-titanium-800">
+                <button
+                  type="button"
+                  onClick={() => setFinancialModalCompany(null)}
+                  className="px-4 py-2 rounded-lg bg-titanium-800 hover:bg-titanium-750 text-titanium-300 text-xs font-medium"
+                >
+                  Anulează
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingFinancial}
+                  className="px-5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-titanium-950 text-xs font-bold transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {submittingFinancial && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Salvează Bilanț Financiar</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

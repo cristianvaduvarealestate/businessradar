@@ -22,7 +22,7 @@ export interface IndustryRiskProfile {
 }
 
 export const MANDATORY_INSURANCE_DISCLAIMER =
-  'Recomandare orientativă bazată pe activitatea declarată și informațiile disponibile. Necesitatea și acoperirea trebuie confirmate în discuția cu reprezentantul firmei.';
+  'Recomandare orientativă bazată pe activitatea declarată și informațiile disponibile. Necesitatea și acoperirea trebuie confirmate în discuția cu reprezentantul firmei. Nu presupuneți că societatea deține sau nu deține o poliță. Niciun risc nu este considerat acoperit fără verificarea termenilor și condițiilor specifice de subscriere ale asigurătorului.';
 
 export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
   TRANSPORT: {
@@ -40,7 +40,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Răsturnarea vehiculului și împrăștierea mărfii pe carosabil',
           'Penalități de întârziere la livrare stipulate în contractul de transport',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Un camion încărcat cu componente industriale implicat într-un accident pe autostradă în Germania poate genera o daună de marfă de peste 180.000 EUR. Fără o poliță CMR validă cu clauze de cabotaj și furt, transportatorul este direct răspunzător cu întregul său patrimoniu.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Un camion încărcat cu componente industriale implicat într-un accident pe autostradă în Germania poate genera o daună de marfă de peste 180.000 EUR. Fără o poliță CMR validă cu clauze de cabotaj și furt, transportatorul este direct răspunzător cu întregul său patrimoniu.',
         underwritingCaveat: 'Acoperirea depinde de limitele per eveniment declarate, tipul mărfurilor (generale vs. ADR/perisabile) și respectarea parcărilor securizate pe timp de noapte.',
       },
       {
@@ -53,7 +53,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Pierderea veniturilor pe perioada imobilizării capului tractor în service',
           'Distrugerea anvelopelor și daune cauzate de carosabil deteriorat',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: O avarie la motor sau cabina unui cap tractor nou poate costa peste 120.000 RON. Fără CASCO flotă, firma trebuie să acopere reparația din fluxul de numerar curent sau să abandoneze contractul de transport.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] O avarie la motor sau cabina unui cap tractor nou poate costa peste 120.000 RON. Fără CASCO flotă, firma trebuie să acopere reparația din fluxul de numerar curent sau să abandoneze contractul de transport.',
         underwritingCaveat: 'Clauzele bonus-malus se calculează pe baza istoricului de daunalitate al flotei din ultimii 3 ani.',
       },
       {
@@ -64,7 +64,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Pierderea valorii integrale a bunurilor de mare valoare cu greutate redusă (electronice, farmaceutice)',
           'Daune provocate de forță majoră excluse de regulă din răspunderea cărăușului',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Transportul unui palet de echipamente IT de 200 kg în valoare de 50.000 EUR este despăgubit sub CMR doar în limita a aprox. 2.000 EUR. Diferența de 48.000 EUR este suportată integral de proprietar dacă nu deține poliță Cargo.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Transportul unui palet de echipamente IT de 200 kg în valoare de 50.000 EUR este despăgubit sub CMR doar în limita a aprox. 2.000 EUR. Diferența de 48.000 EUR este suportată integral de proprietar dacă nu deține poliță Cargo.',
         underwritingCaveat: 'Necesită declararea prealabilă a valorii de factură a fiecărui transport expediat.',
       },
     ],
@@ -99,7 +99,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Furtul materialelor puse în operă sau depozitate pe șantier',
           'Daune provocate clădirilor sau terenurilor învecinate prin tasare sau trepidații',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: O furtună violentă care provoacă inundarea subsolurilor tehnice și degradarea instalațiilor electrice proaspăt montate la un bloc în execuție poate produce pagube de peste 70.000 EUR. Fără CAR, antreprenorul trebuie să refacă lucrările pe cheltuială proprie.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] O furtună violentă care provoacă inundarea subsolurilor tehnice și degradarea instalațiilor electrice proaspăt montate la un bloc în execuție poate produce pagube de peste 70.000 EUR. Fără CAR, antreprenorul trebuie să refacă lucrările pe cheltuială proprie.',
         underwritingCaveat: 'Valoarea asigurată trebuie să reflecte valoarea totală a contractului de lucrări, inclusiv materialele furnizate de beneficiar.',
       },
       {
@@ -110,7 +110,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Blocarea lichidităților financiare în conturi escrow de garanție la trezorerie',
           'Pierzarea participării la licitații publice din cauza depășirii plafoanelor bancare',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Pentru un contract de 5 milioane RON, reținerea unei garanții de 10% blochează 500.000 RON în trezorerie timp de 3-5 ani până la recepția finală. O poliță de garanție de asigurare deblochează complet această sumă contra unei prime reduse.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Pentru un contract de 5 milioane RON, reținerea unei garanții de 10% blochează 500.000 RON în trezorerie timp de 3-5 ani până la recepția finală. O poliță de garanție de asigurare deblochează complet această sumă contra unei prime reduse.',
         underwritingCaveat: 'Emiterea este condiționată de analiza situațiilor financiare anuale și experiența similară în execuția de lucrări.',
       },
       {
@@ -122,7 +122,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Furtul componentelor scumpe (calculatoare de bord, pompe hidraulice)',
           'Avarii produse de căderi de pietre sau coliziuni accidentale',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Răsturnarea unui excavator de 20 de tone într-un șanț poate genera costuri de scoatere și reparație hidraulică de peste 40.000 EUR, neacoperite de nicio poliță auto standard.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Răsturnarea unui excavator de 20 de tone într-un șanț poate genera costuri de scoatere și reparație hidraulică de peste 40.000 EUR, neacoperite de nicio poliță auto standard.',
         underwritingCaveat: 'Necesită evidențierea utilajelor în registrul de mijloace fixe și respectarea instrucțiunilor producătorului.',
       },
     ],
@@ -155,7 +155,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Avarii produse de inundații sau descărcări electrice atmosferice',
           'Distrugerea stocurilor de produse finite gata de livrare',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Un incendiu într-un atelier de debitare poate mistui utilaje CNC și materii prime în valoare de sute de mii de euro. Fără o acoperire flexibilă la valoare de reconstituire, producția este oprită definitiv.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Un incendiu într-un atelier de debitare poate mistui utilaje CNC și materii prime în valoare de sute de mii de euro. Fără o acoperire flexibilă la valoare de reconstituire, producția este oprită definitiv.',
         underwritingCaveat: 'Inspecția de risc evaluează existența hidranților, a detectoarelor de fum și a autorizației ISU.',
       },
       {
@@ -167,7 +167,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Scurtcircuite în tablourile electronice de comandă automatizată',
           'Costul de înlocuire a componentelor unicat comandate de la producător extern',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Blocarea unui compresor de mare capacitate sau a unei linii de ambalare automată poate genera un cost direct de înlocuire de 45.000 EUR plus costurile transportului de urgență.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Blocarea unui compresor de mare capacitate sau a unei linii de ambalare automată poate genera un cost direct de înlocuire de 45.000 EUR plus costurile transportului de urgență.',
         underwritingCaveat: 'Utilajele trebuie să fie în stare de funcționare și să aibă reviziile periodice consemnate în cartea tehnică.',
       },
       {
@@ -178,7 +178,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Incapacitatea de a plăti salariile angajaților când producția este paralizată',
           'Pierderea contractelor comerciale din cauza întârzierilor de producție',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Oprirea unei fabrici timp de 6 săptămâni după o avarie produce pierderi fixe de salarii și profit de peste 100.000 RON, chiar dacă reparația utilajului a fost plătită.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Oprirea unei fabrici timp de 6 săptămâni după o avarie produce pierderi fixe de salarii și profit de peste 100.000 RON, chiar dacă reparația utilajului a fost plătită.',
         underwritingCaveat: 'Se stabilește o perioadă de indemnizare (uzual 6, 12 sau 18 luni) și o franșiză temporală (uzual 2-3 zile).',
       },
       {
@@ -189,7 +189,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Pretenții de daune din partea clienților cărora produsul le-a afectat alte bunuri',
           'Costuri de retragere a produsului de pe piață în caz de neconformitate gravă',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Un lot de componente defecte integrate de client în alte instalații poate duce la defectarea acestora și litigii comerciale de zeci de mii de euro.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Un lot de componente defecte integrate de client în alte instalații poate duce la defectarea acestora și litigii comerciale de zeci de mii de euro.',
         underwritingCaveat: 'Este necesară prezentarea certificatelor de conformitate și a standardelor de calitate aplicate (ex: ISO 9001).',
       },
     ],
@@ -220,7 +220,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Nedeliverarea la termen a modulelor convenite în acorduri SLA stricte',
           'Acuzații de neglijență profesională sau încălcare neintenționată a drepturilor de autor',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Un client din Germania solicită despăgubiri de 150.000 EUR pentru întreruperea vânzărilor online cauzată de un release software defectuos. O poliță Tech E&O acoperă atât asistența juridică de specialitate, cât și daunele negociate.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Un client din Germania solicită despăgubiri de 150.000 EUR pentru întreruperea vânzărilor online cauzată de un release software defectuos. O poliță Tech E&O acoperă atât asistența juridică de specialitate, cât și daunele negociate.',
         underwritingCaveat: 'Trebuie declarată jurisdicția contractelor (clienții din SUA/Canada necesită clauze speciale și limite mai mari).',
       },
       {
@@ -232,7 +232,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Scurgeri de date confidențiale sau credențiale ale utilizatorilor',
           'Costuri juridice și de comunicare de criză impuse de autoritățile de protecție a datelor',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Un atac cibernetic asupra unei infrastructuri SaaS costă în medie 60.000 - 100.000 EUR doar pentru investigația experților de securitate și refacerea integrității datelor.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Un atac cibernetic asupra unei infrastructuri SaaS costă în medie 60.000 - 100.000 EUR doar pentru investigația experților de securitate și refacerea integrității datelor.',
         underwritingCaveat: 'Condiționată de existența autentificării cu doi factori (MFA) și copii de rezervă izolate offline (air-gapped).',
       },
       {
@@ -243,7 +243,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Litigii cu privire la deciziile de alocare a fondurilor sau diluarea participațiilor',
           'Răspunderea personală a administratorului pentru obligații ale societății în dispută',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: O acțiune în instanță a unui acționar minoritar privind gestionarea defectuoasă a fondurilor poate atrage popriri pe conturile personale ale administratorului până la clarificarea litigiului.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] O acțiune în instanță a unui acționar minoritar privind gestionarea defectuoasă a fondurilor poate atrage popriri pe conturile personale ale administratorului până la clarificarea litigiului.',
         underwritingCaveat: 'Polița acoperă cheltuielile de apărare chiar dacă acuzațiile se dovedesc ulterior nefondate.',
       },
     ],
@@ -274,7 +274,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Răspunderea persoanei juridice (clinica) pentru actele personalului medical angajat/colaborator',
           'Cheltuieli de judecată și onorarii de expertiză medico-legală',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: O cerere de daune morale și materiale formulată de un pacient pentru o complicație post-operatorie poate ajunge la zeci de mii de euro. Fără o poliță de malpraxis pentru clinică cu limite adecvate, fondurile operaționale ale cabinetului pot fi blocate.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] O cerere de daune morale și materiale formulată de un pacient pentru o complicație post-operatorie poate ajunge la zeci de mii de euro. Fără o poliță de malpraxis pentru clinică cu limite adecvate, fondurile operaționale ale cabinetului pot fi blocate.',
         underwritingCaveat: 'Polița individuală a medicului nu acoperă întotdeauna răspunderea persoanei juridice (clinica privată).',
       },
       {
@@ -286,7 +286,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Avarii cauzate de scăparea sondelor scumpe sau a pieselor de mână stomatologice',
           'Blocarea activității clinicii din cauza lipsei pieselor de schimb asigurate',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Înlocuirea unei sonde pentru un ecograf 4D de înaltă performanță costă între 8.000 și 15.000 EUR. Fără o poliță tehnică adecvată, clinica trebuie să suporte acest cost imediat.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Înlocuirea unei sonde pentru un ecograf 4D de înaltă performanță costă între 8.000 și 15.000 EUR. Fără o poliță tehnică adecvată, clinica trebuie să suporte acest cost imediat.',
         underwritingCaveat: 'Aparatura trebuie să fie deservită de personal instruit și să aibă contracte de service autorizat.',
       },
     ],
@@ -317,7 +317,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Inundații provenite de la conducte de apă care degradează finisajele hotelului',
           'Pierderea profitului zilnic pe durata lunilor de renovare forțată',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Un incendiu la hota unei bucătării de restaurant produce daune de 50.000 EUR și închide unitatea timp de 2 luni. O poliță de Business Interruption plătește salariile angajaților și marja de profit care s-ar fi realizat.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Un incendiu la hota unei bucătării de restaurant produce daune de 50.000 EUR și închide unitatea timp de 2 luni. O poliță de Business Interruption plătește salariile angajaților și marja de profit care s-ar fi realizat.',
         underwritingCaveat: 'Măsurile de securitate la incendiu (autorizație ISU, stingătoare verificate, mentenanță hote) sunt obligatorii.',
       },
       {
@@ -329,7 +329,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Acuzații de contaminare alimentară sau nerespectare a regimului alergenilor',
           'Deteriorarea bunurilor lăsate în camerele de hotel sau parcarea privată',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Un client care alunecă pe o scară umedă și suferă o fractură gravă poate solicita daune morale și cheltuieli medicale de peste 30.000 RON în instanță.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Un client care alunecă pe o scară umedă și suferă o fractură gravă poate solicita daune morale și cheltuieli medicale de peste 30.000 RON în instanță.',
         underwritingCaveat: 'Unitatea trebuie să aibă implementat planul de igienă și siguranță alimentară HACCP.',
       },
     ],
@@ -360,7 +360,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Avarii produse la instalațiile comune (centrale termice, lifturi, pompe)',
           'Distrugeri provocate de chiriași neacoperite de garanțiile contractuale',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: O avarie la hidroforul unei clădiri de birouri poate inunda arhivele și instalațiile de la subsol, generând reparații de peste 80.000 RON.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] O avarie la hidroforul unei clădiri de birouri poate inunda arhivele și instalațiile de la subsol, generând reparații de peste 80.000 RON.',
         underwritingCaveat: 'Suma asigurată trebuie actualizată conform valorii de reconstrucție la prețurile pieței actuale de construcții.',
       },
       {
@@ -371,7 +371,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Căderi de bucăți de tencuială, țigle sau gheață pe mașinile parcate sau trecători',
           'Pierderea veniturilor din chirii timp de mai multe luni în urma unui sinistru',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Un incendiu parțial la un etaj oprește încasarea unei chirii de 6.000 EUR/lună pe o perioadă de 6 luni, reprezentând o pierdere netă de 36.000 EUR pentru proprietar.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Un incendiu parțial la un etaj oprește încasarea unei chirii de 6.000 EUR/lună pe o perioadă de 6 luni, reprezentând o pierdere netă de 36.000 EUR pentru proprietar.',
         underwritingCaveat: 'Valoarea chiriei asigurate trebuie dovedită prin contractele de închiriere active la data producerii evenimentului.',
       },
     ],
@@ -402,7 +402,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Concedii medicale prelungite din cauza accesului lent la investigații medicale',
           'Cheltuieli neprevăzute suportate de companie în caz de accident de muncă',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Înlocuirea unui angajat calificat costă în medie echivalentul a 3-4 salarii lunare. O asigurare privată de sănătate de 150 RON/lună oferă stabilitate echipei și reduce absenteismul.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Înlocuirea unui angajat calificat costă în medie echivalentul a 3-4 salarii lunare. O asigurare privată de sănătate de 150 RON/lună oferă stabilitate echipei și reduce absenteismul.',
         underwritingCaveat: 'Polițele de grup pot fi contractate de regulă pentru echipe de minimum 3-5 angajați.',
       },
       {
@@ -414,7 +414,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Furtul calculatoarelor, serverelor și echipamentelor de birou',
           'Inundație de la instalația sanitară a spațiului',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: O inundație de weekend de la un robinet defect poate distruge echipamente IT și arhive în valoare de 40.000 RON.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] O inundație de weekend de la un robinet defect poate distruge echipamente IT și arhive în valoare de 40.000 RON.',
         underwritingCaveat: 'Spațiile trebuie să fie dotate cu încuietori adecvate sau sistem de alarmă monitorizat.',
       },
       {
@@ -425,7 +425,7 @@ export const INDUSTRY_PROFILES: Record<string, IndustryRiskProfile> = {
           'Accidentarea unui vizitator în sediul companiei',
           'Avarierea bunurilor unui client pe durata prestării serviciului',
         ],
-        illustrativeLossExample: 'Exemplu ilustrativ: Vătămarea unui partener de afaceri în timpul unei vizite la sediu poate genera pretenții judiciare de despăgubire a cheltuielilor de tratament.',
+        illustrativeLossExample: '[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie] Vătămarea unui partener de afaceri în timpul unei vizite la sediu poate genera pretenții judiciare de despăgubire a cheltuielilor de tratament.',
         underwritingCaveat: 'Exclude de regulă faptele intenționate sau nerespectarea gravă a normelor de protecție a muncii.',
       },
     ],

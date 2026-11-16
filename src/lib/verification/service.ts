@@ -223,8 +223,8 @@ export class CompanyVerificationService {
       const netProfit = financialRecord.net_profit || 0;
       const netLoss = financialRecord.net_loss || 0;
 
-      // Recent filings threshold (year 2020 or newer)
-      if (year >= 2020) {
+      // Recent filings threshold (year 2022 or newer)
+      if (year >= 2022) {
         if (turnover > 0) {
           return {
             status: 'ACTIVE_COMMERCIAL_EVIDENCE',
@@ -247,7 +247,7 @@ export class CompanyVerificationService {
           };
         }
       } else {
-        // Historical filings only (< 2020)
+        // Historical filings only (< 2022)
         return {
           status: 'HISTORICAL_ACTIVITY_ONLY',
           latestYear: year,
@@ -255,7 +255,7 @@ export class CompanyVerificationService {
           employeesAvg: employees,
           netProfit,
           netLoss,
-          details: `Date financiare disponibile doar pentru anul istoric ${year}. Fără raportări recente.`,
+          details: `Date financiare disponibile doar pentru anul istoric ${year} (anterior anului 2022). Fără raportări recente.`,
         };
       }
     }
@@ -284,28 +284,39 @@ export class CompanyVerificationService {
   /**
    * Central Prospecting & Calling Queue Eligibility Decision Function
    * Strictly evaluates whether Cristian should see this company in the active calling list.
+   * Requires:
+   * 1. Legally ACTIVE
+   * 2. Fiscally ACTIVE
+   * 3. ACTIVE_COMMERCIAL_EVIDENCE
+   * 4. Usable, operational phone (not wrong number / invalid / outdated)
+   * 5. Non-suppressed
+   * 6. No status conflict
+   * 7. Fresh verification within threshold (default 90 days)
    */
   static evaluateCompanyEligibility(input: {
     legalStatus: LegalStatus;
     fiscalStatus: FiscalStatus;
     commercialEvidenceStatus?: CommercialEvidenceStatus;
     hasValidContact: boolean;
+    contactVerificationStatus?: string;
     isSuppressed?: boolean;
     hasConflict?: boolean;
+    lastStatusCheckAt?: string | null;
+    freshnessMaxDays?: number;
   }): CompanyEligibilityResult {
     const reasons: string[] = [];
 
     // 1. Legal Status Check
     if (input.legalStatus === 'RADIATED') {
-      reasons.push('Companie radiată din Registrul Comerțului (ONRC)');
+      reasons.push('Companie radiată din registrul oficial');
     } else if (input.legalStatus === 'SUSPENDED') {
-      reasons.push('Activitate suspendată la Registrul Comerțului');
+      reasons.push('Activitate suspendată');
     } else if (input.legalStatus === 'DISSOLVED') {
       reasons.push('Companie dizolvată');
     } else if (input.legalStatus === 'IN_LIQUIDATION') {
       reasons.push('Companie în procedură de lichidare, faliment sau insolvență');
     } else if (input.legalStatus === 'UNKNOWN') {
-      reasons.push('Stare juridică neverificată la Registrul Comerțului');
+      reasons.push('Stare juridică neverificată');
     } else if (input.legalStatus === 'VERIFICATION_ERROR') {
       reasons.push('Eroare tehnică la verificarea stării juridice');
     }
@@ -319,19 +330,44 @@ export class CompanyVerificationService {
       reasons.push('Eroare la interogarea bazei de date fiscale ANAF');
     }
 
-    // 3. Status Conflict Check
+    // 3. Commercial Activity Evidence Check (MANDATORY)
+    const commStatus = input.commercialEvidenceStatus || 'COMMERCIAL_ACTIVITY_UNKNOWN';
+    if (commStatus !== 'ACTIVE_COMMERCIAL_EVIDENCE') {
+      if (commStatus === 'NEW_COMPANY') {
+        reasons.push('Companie nou înființată (înregistrată în coada de startup-uri)');
+      } else if (commStatus === 'LIMITED_COMMERCIAL_EVIDENCE') {
+        reasons.push('Evidență comercială limitată (cifră de afaceri 0 sau 0 salariați)');
+      } else if (commStatus === 'HISTORICAL_ACTIVITY_ONLY') {
+        reasons.push('Doar evidență financiară istorică (fără bilanț recent post-2022)');
+      } else {
+        reasons.push('Lipsă bilanț financiar recent la Ministerul Finanțelor');
+      }
+    }
+
+    // 4. Status Conflict Check
     if (input.hasConflict) {
       reasons.push('Conflict între evidențele oficiale (STATUS_CONFLICT)');
     }
 
-    // 4. Suppression List Check
+    // 5. Suppression List Check
     if (input.isSuppressed) {
       reasons.push('Companie sau contact inclus în lista de suprimare (Do Not Contact)');
     }
 
-    // 5. Usable Contact Check
+    // 6. Usable Contact Check
     if (!input.hasValidContact) {
       reasons.push('Fără număr de telefon sau canal de contact valid');
+    } else if (input.contactVerificationStatus && ['WRONG_NUMBER', 'INVALID_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED'].includes(input.contactVerificationStatus)) {
+      reasons.push(`Număr de telefon nefuncțional (${input.contactVerificationStatus})`);
+    }
+
+    // 7. Freshness Check
+    if (input.lastStatusCheckAt) {
+      const checkDate = new Date(input.lastStatusCheckAt).getTime();
+      const maxAgeMs = (input.freshnessMaxDays || 90) * 24 * 60 * 60 * 1000;
+      if (!isNaN(checkDate) && (Date.now() - checkDate > maxAgeMs)) {
+        reasons.push('Verificare expirată (mai veche de 90 de zile)');
+      }
     }
 
     const isEligible = reasons.length === 0;
@@ -341,7 +377,7 @@ export class CompanyVerificationService {
       ineligibilityReasons: reasons,
       legalStatus: input.legalStatus,
       fiscalStatus: input.fiscalStatus,
-      commercialEvidenceStatus: input.commercialEvidenceStatus || 'COMMERCIAL_ACTIVITY_UNKNOWN',
+      commercialEvidenceStatus: commStatus,
       reasonsText: reasons.join('; '),
     };
   }

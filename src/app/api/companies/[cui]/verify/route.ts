@@ -105,14 +105,15 @@ export async function POST(
       }
     }
 
-    // 5. Check if contact exists
+    // 5. Check if usable contact exists
     const contacts = await queryAll('SELECT * FROM contact_records WHERE cui = ?', [cui]);
-    const validContact = contacts.find(
+    const usableContact = contacts.find(
       (c) =>
         c.contact_value &&
-        !['UNREACHABLE', 'INVALID', 'WRONG_NUMBER'].includes(c.verification_status || '')
+        ['MOBILE', 'LANDLINE'].includes(c.contact_type) &&
+        !['UNREACHABLE', 'INVALID', 'WRONG_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED'].includes(c.verification_status || '')
     );
-    const hasValidContact = Boolean(validContact);
+    const hasValidContact = Boolean(usableContact);
 
     // 6. Check suppression
     const suppression = await queryOne('SELECT * FROM suppression_list WHERE cui = ?', [cui]);
@@ -129,15 +130,18 @@ export async function POST(
     );
 
     // 8. Central Eligibility Decision
+    const nowIso = new Date().toISOString();
     const eligibility = CompanyVerificationService.evaluateCompanyEligibility({
       legalStatus: legalStatusResult.status,
       fiscalStatus: fiscalStatusResult.status,
       commercialEvidenceStatus: commEvidence.status,
       hasValidContact,
+      contactVerificationStatus: usableContact?.verification_status,
       isSuppressed,
+      lastStatusCheckAt: nowIso,
     });
 
-    // 9. Update DB
+    // 9. Update DB & Record Persistent Audit Evidence
     await executeRun(
       `UPDATE companies SET
         legal_status = ?,
@@ -151,7 +155,8 @@ export async function POST(
         is_calling_eligible = ?,
         ineligibility_reasons = ?,
         last_status_check_at = datetime('now'),
-        status_verification_source = 'ANAF_V9_LIVE'
+        status_verification_source = 'ANAF_FISCAL_REGISTER',
+        onrc_status = COALESCE(onrc_status, 'ONRC_UNVERIFIED')
       WHERE cui = ?`,
       [
         legalStatusResult.status,
@@ -165,6 +170,30 @@ export async function POST(
         eligibility.isEligible ? 1 : 0,
         eligibility.reasonsText || null,
         cui,
+      ]
+    );
+
+    // Record persistent status evidence
+    const evidenceStatus = `LEGAL:${legalStatusResult.status}|FISCAL:${fiscalStatusResult.status}|EFACTURA:${fiscalStatusResult.isRoEFactura ? 1 : 0}`;
+    const nextDue = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    await executeRun(
+      `INSERT INTO company_status_evidence (
+        cui, source_name, source_url, query_timestamp, response_timestamp,
+        status_returned, effective_date, verification_method, raw_response_ref,
+        last_successful_verification, next_verification_due, provider_error, verified_by
+      ) VALUES (?, 'ANAF_PLATITOR_TVA_REST_V9', 'https://webservicesp.anaf.ro/api/PlatitorTvaRest/v9/tva',
+                ?, ?, ?, ?, 'OFFICIAL_SYNCHRONOUS_REST_API', ?, ?, ?, ?, ?)`,
+      [
+        cui,
+        nowIso,
+        nowIso,
+        evidenceStatus,
+        legalStatusResult.date || fiscalStatusResult.inactivationDate || null,
+        `ANAF_LIVE_STARE: ${legalStatusResult.description}`,
+        nowIso,
+        nextDue,
+        providerError ? 'CONNECTION_FAILED' : null,
+        typeof auth.user === 'string' ? auth.user : 'ADMIN_MANUAL',
       ]
     );
 

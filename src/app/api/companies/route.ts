@@ -92,11 +92,19 @@ export async function GET(request: NextRequest) {
       params.push(status);
     }
 
-    // Calling View (Eligible vs Excluded)
+    // Calling View (Eligible vs Segmented Review Queues)
     if (callingView === 'eligible' || eligibleOnly === 'true') {
       whereClauses.push('is_calling_eligible = 1');
+    } else if (callingView === 'unconfirmed_commercial') {
+      whereClauses.push("commercial_evidence_status IN ('NO_FINANCIAL_EVIDENCE', 'LIMITED_COMMERCIAL_EVIDENCE', 'HISTORICAL_ACTIVITY_ONLY', 'COMMERCIAL_ACTIVITY_UNKNOWN') AND legal_status = 'ACTIVE' AND fiscal_status IN ('FISCALLY_ACTIVE', 'REACTIVATED')");
+    } else if (callingView === 'new_companies') {
+      whereClauses.push("commercial_evidence_status = 'NEW_COMPANY' AND legal_status = 'ACTIVE'");
+    } else if (callingView === 'needs_verification') {
+      whereClauses.push("(legal_status = 'UNKNOWN' OR onrc_status = 'ONRC_UNVERIFIED') AND legal_status NOT IN ('RADIATED', 'SUSPENDED', 'DISSOLVED', 'IN_LIQUIDATION')");
+    } else if (callingView === 'unverified_contacts') {
+      whereClauses.push("EXISTS (SELECT 1 FROM contact_records cr WHERE cr.cui = companies.cui AND cr.verification_status IN ('WRONG_NUMBER', 'INVALID_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED', 'FORMAT_VALID_ONLY', 'UNVERIFIED'))");
     } else if (callingView === 'excluded' || ineligibleOnly === 'true') {
-      whereClauses.push('is_calling_eligible = 0');
+      whereClauses.push("is_calling_eligible = 0 AND (legal_status IN ('RADIATED', 'SUSPENDED', 'DISSOLVED', 'IN_LIQUIDATION') OR fiscal_status = 'FISCALLY_INACTIVE' OR ineligibility_reasons LIKE '%suprimare%')");
     }
 
     if (legalStatus) {

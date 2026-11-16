@@ -38,6 +38,11 @@ export async function GET(request: NextRequest) {
         COUNT(CASE WHEN legal_status = 'DISSOLVED' THEN 1 END) as dissolved,
         COUNT(CASE WHEN legal_status = 'IN_LIQUIDATION' THEN 1 END) as in_liquidation,
         COUNT(CASE WHEN legal_status = 'UNKNOWN' THEN 1 END) as legal_unknown,
+        COUNT(CASE WHEN onrc_status = 'ONRC_ACTIVE' THEN 1 END) as onrc_verified_active,
+        COUNT(CASE WHEN onrc_status = 'ONRC_RADIATED' THEN 1 END) as onrc_verified_radiated,
+        COUNT(CASE WHEN onrc_status = 'ONRC_SUSPENDED' THEN 1 END) as onrc_verified_suspended,
+        COUNT(CASE WHEN onrc_status = 'ONRC_DISSOLVED' THEN 1 END) as onrc_verified_dissolved,
+        COUNT(CASE WHEN onrc_status = 'ONRC_UNVERIFIED' OR onrc_status IS NULL THEN 1 END) as onrc_unverified,
         COUNT(CASE WHEN fiscal_status = 'FISCALLY_ACTIVE' THEN 1 END) as fiscally_active,
         COUNT(CASE WHEN fiscal_status = 'FISCALLY_INACTIVE' THEN 1 END) as fiscally_inactive,
         COUNT(CASE WHEN fiscal_status = 'REACTIVATED' THEN 1 END) as reactivated,
@@ -46,6 +51,7 @@ export async function GET(request: NextRequest) {
         COUNT(CASE WHEN is_calling_eligible = 0 THEN 1 END) as calling_excluded,
         COUNT(CASE WHEN commercial_evidence_status = 'ACTIVE_COMMERCIAL_EVIDENCE' THEN 1 END) as active_commercial,
         COUNT(CASE WHEN commercial_evidence_status = 'LIMITED_COMMERCIAL_EVIDENCE' THEN 1 END) as limited_commercial,
+        COUNT(CASE WHEN commercial_evidence_status = 'HISTORICAL_ACTIVITY_ONLY' THEN 1 END) as historical_commercial,
         COUNT(CASE WHEN commercial_evidence_status = 'NEW_COMPANY' THEN 1 END) as new_company,
         COUNT(CASE WHEN commercial_evidence_status IN ('NO_FINANCIAL_EVIDENCE', 'COMMERCIAL_ACTIVITY_UNKNOWN') THEN 1 END) as no_financial_evidence
       FROM companies
@@ -57,6 +63,9 @@ export async function GET(request: NextRequest) {
         COUNT(DISTINCT cui) as companies_with_any_contact,
         COUNT(DISTINCT CASE WHEN contact_type = 'MOBILE' THEN cui END) as with_mobile,
         COUNT(DISTINCT CASE WHEN contact_type = 'LANDLINE' THEN cui END) as with_landline,
+        COUNT(DISTINCT CASE WHEN contact_type = 'MOBILE' AND verification_status NOT IN ('WRONG_NUMBER', 'INVALID_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED') THEN cui END) as usable_mobile_contacts,
+        COUNT(DISTINCT CASE WHEN contact_type = 'LANDLINE' AND verification_status NOT IN ('WRONG_NUMBER', 'INVALID_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED') THEN cui END) as usable_landline_contacts,
+        COUNT(DISTINCT CASE WHEN verification_status = 'MANUALLY_CONFIRMED' THEN cui END) as manually_confirmed_contacts,
         COUNT(DISTINCT CASE WHEN contact_type = 'EMAIL' THEN cui END) as with_emails,
         COUNT(DISTINCT CASE WHEN contact_type = 'WEBSITE' THEN cui END) as with_websites,
         COUNT(*) as total_contact_records

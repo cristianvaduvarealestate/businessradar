@@ -70,20 +70,45 @@ function evaluateCommercialEvidence(financialRecord, incorporationDate) {
 
 function evaluateCompanyEligibility(input) {
   const reasons = [];
-  if (input.legalStatus === 'RADIATED') reasons.push('Companie radiată din Registrul Comerțului (ONRC)');
-  else if (input.legalStatus === 'SUSPENDED') reasons.push('Activitate suspendată la Registrul Comerțului');
+  if (input.legalStatus === 'RADIATED') reasons.push('Companie radiată din registrul oficial');
+  else if (input.legalStatus === 'SUSPENDED') reasons.push('Activitate suspendată');
   else if (input.legalStatus === 'DISSOLVED') reasons.push('Companie dizolvată');
   else if (input.legalStatus === 'IN_LIQUIDATION') reasons.push('Companie în procedură de lichidare, faliment sau insolvență');
-  else if (input.legalStatus === 'UNKNOWN') reasons.push('Stare juridică neverificată la Registrul Comerțului');
+  else if (input.legalStatus === 'UNKNOWN') reasons.push('Stare juridică neverificată');
   else if (input.legalStatus === 'VERIFICATION_ERROR') reasons.push('Eroare tehnică la verificarea stării juridice');
 
   if (input.fiscalStatus === 'FISCALLY_INACTIVE') reasons.push('Companie inactivă fiscal în evidențele ANAF');
   else if (input.fiscalStatus === 'UNKNOWN') reasons.push('Stare fiscală neverificată la ANAF');
   else if (input.fiscalStatus === 'VERIFICATION_ERROR') reasons.push('Eroare la interogarea bazei de date fiscale ANAF');
 
+  const commStatus = input.commercialEvidenceStatus || 'COMMERCIAL_ACTIVITY_UNKNOWN';
+  if (commStatus !== 'ACTIVE_COMMERCIAL_EVIDENCE') {
+    if (commStatus === 'NEW_COMPANY') {
+      reasons.push('Companie nou înființată (înregistrată în coada de startup-uri)');
+    } else if (commStatus === 'LIMITED_COMMERCIAL_EVIDENCE') {
+      reasons.push('Evidență comercială limitată (cifră de afaceri 0 sau 0 salariați)');
+    } else if (commStatus === 'HISTORICAL_ACTIVITY_ONLY') {
+      reasons.push('Doar evidență financiară istorică (fără bilanț recent post-2022)');
+    } else {
+      reasons.push('Lipsă bilanț financiar recent la Ministerul Finanțelor');
+    }
+  }
+
   if (input.hasConflict) reasons.push('Conflict între evidențele oficiale (STATUS_CONFLICT)');
   if (input.isSuppressed) reasons.push('Companie sau contact inclus în lista de suprimare (Do Not Contact)');
-  if (!input.hasValidContact) reasons.push('Fără număr de telefon sau canal de contact valid');
+  if (!input.hasValidContact) {
+    reasons.push('Fără număr de telefon sau canal de contact valid');
+  } else if (input.contactVerificationStatus && ['WRONG_NUMBER', 'INVALID_NUMBER', 'CONFIRMED_INVALID', 'OUTDATED'].includes(input.contactVerificationStatus)) {
+    reasons.push(`Număr de telefon nefuncțional (${input.contactVerificationStatus})`);
+  }
+
+  if (input.lastStatusCheckAt) {
+    const checkDate = new Date(input.lastStatusCheckAt).getTime();
+    const maxAgeMs = (input.freshnessMaxDays || 90) * 24 * 60 * 60 * 1000;
+    if (!isNaN(checkDate) && (Date.now() - checkDate > maxAgeMs)) {
+      reasons.push('Verificare expirată (mai veche de 90 de zile)');
+    }
+  }
 
   return { isEligible: reasons.length === 0, ineligibilityReasons: reasons };
 }
@@ -171,6 +196,7 @@ test('6. Reactivated company evaluates active status when reactivated', () => {
   const el = evaluateCompanyEligibility({
     legalStatus: 'ACTIVE',
     fiscalStatus: parsed.status,
+    commercialEvidenceStatus: 'ACTIVE_COMMERCIAL_EVIDENCE',
     hasValidContact: true,
   });
   assert.equal(el.isEligible, true);
@@ -394,3 +420,51 @@ test('25. Master database preserves existing CRM interactions and follow-ups', (
   assert.ok(followUpCount >= 1, `Expected at least 1 followup, got ${followUpCount}`);
   db.close();
 });
+
+// 26. Active legal and fiscal status without commercial evidence is excluded from calling queue
+test('26. Active legal and fiscal status without commercial evidence is strictly excluded from calling queue', () => {
+  const el = evaluateCompanyEligibility({
+    legalStatus: 'ACTIVE',
+    fiscalStatus: 'FISCALLY_ACTIVE',
+    commercialEvidenceStatus: 'NO_FINANCIAL_EVIDENCE',
+    hasValidContact: true,
+  });
+  assert.equal(el.isEligible, false);
+  assert.ok(el.ineligibilityReasons.some((r) => r.includes('bilanț')));
+});
+
+// 27. Wrong number prevents company eligibility
+test('27. Wrong number or invalid number prevents company eligibility', () => {
+  const el = evaluateCompanyEligibility({
+    legalStatus: 'ACTIVE',
+    fiscalStatus: 'FISCALLY_ACTIVE',
+    commercialEvidenceStatus: 'ACTIVE_COMMERCIAL_EVIDENCE',
+    hasValidContact: true,
+    contactVerificationStatus: 'WRONG_NUMBER',
+  });
+  assert.equal(el.isEligible, false);
+  assert.ok(el.ineligibilityReasons.some((r) => r.includes('nefuncțional')));
+});
+
+// 28. Verification older than freshness threshold flags expired verification
+test('28. Verification older than freshness threshold flags expired verification', () => {
+  const oldDate = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000).toISOString();
+  const el = evaluateCompanyEligibility({
+    legalStatus: 'ACTIVE',
+    fiscalStatus: 'FISCALLY_ACTIVE',
+    commercialEvidenceStatus: 'ACTIVE_COMMERCIAL_EVIDENCE',
+    hasValidContact: true,
+    lastStatusCheckAt: oldDate,
+    freshnessMaxDays: 90,
+  });
+  assert.equal(el.isEligible, false);
+  assert.ok(el.ineligibilityReasons.some((r) => r.includes('expirată')));
+});
+
+// 29. Insurance hypothetical loss examples contain mandatory illustrative label
+test('29. Insurance hypothetical loss examples contain mandatory illustrative label', () => {
+  const fs = require('fs');
+  const code = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'insurance', 'intelligence.ts'), 'utf-8');
+  assert.ok(code.includes('[EXEMPLU IPOTETIC — valoare ilustrativă, nu daună reală și nu estimare pentru această companie]'));
+});
+
