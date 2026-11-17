@@ -59,19 +59,20 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
-  // Read dedicated secret - falls back to RADAR_SECURITY_KEY if RADAR_INGESTION_SECRET is unconfigured
-  const secret = getIngestionSecret() || (process.env.NODE_ENV === 'test' ? 'test_ingestion_secret_key_12345' : '');
+  try {
+    // Read dedicated secret - falls back to RADAR_SECURITY_KEY if RADAR_INGESTION_SECRET is unconfigured
+    const secret = getIngestionSecret() || (process.env.NODE_ENV === 'test' ? 'test_ingestion_secret_key_12345' : '');
 
-  if (!secret) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: 'INGESTION_NOT_CONFIGURED',
-        message: 'Endpoint-ul de ingestie necesită configurarea secretului RADAR_INGESTION_SECRET.',
-      },
-      { status: 401 }
-    );
-  }
+    if (!secret) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'INGESTION_NOT_CONFIGURED',
+          message: 'Endpoint-ul de ingestie necesită configurarea secretului RADAR_INGESTION_SECRET.',
+        },
+        { status: 401 }
+      );
+    }
 
   // 1. Read raw body once for HMAC signature verification
   let rawBody: string;
@@ -563,18 +564,29 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  return NextResponse.json({
-    success: true,
-    syncId: body.syncId,
-    batchId: body.batchId,
-    accepted: acceptedCount,
-    duplicates: duplicateCount,
-    rejected: rejectedCount,
-    cohortCounts,
-    anafVerified: anafVerifiedCount,
-    monitoringState: body.isComplete ? 'CONTINUOUS_DISCOVERY' : monitoringState,
-    activationDate,
-    cursorEnd: body.cursorEnd,
-    isComplete: Boolean(body.isComplete),
-  });
+    return NextResponse.json({
+      success: true,
+      syncId: body.syncId,
+      batchId: body.batchId,
+      accepted: acceptedCount,
+      duplicates: duplicateCount,
+      rejected: rejectedCount,
+      cohortCounts,
+      anafVerified: anafVerifiedCount,
+      monitoringState: body.isComplete ? 'CONTINUOUS_DISCOVERY' : monitoringState,
+      activationDate,
+      cursorEnd: body.cursorEnd,
+      isComplete: Boolean(body.isComplete),
+    });
+  } catch (err: any) {
+    console.error('[INGESTION_FATAL_ERROR]', err);
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'INGESTION_EXECUTION_ERROR',
+        message: err?.message || 'Eroare internă la procesarea lotului de date.',
+      },
+      { status: 500 }
+    );
+  }
 }
