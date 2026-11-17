@@ -418,8 +418,8 @@ export class MonitoringService {
     // 1. Concurrency Check (atomic lock check)
     const config = await this.getConfig();
     const currentLock = parseInt(config.sync_lock || '0', 10);
-    // Lock expires after 10 minutes to prevent deadlocks
-    if (currentLock > 0 && Date.now() - currentLock < 10 * 60 * 1000) {
+    // Lock expires after 60 seconds to prevent deadlocks
+    if (currentLock > 0 && Date.now() - currentLock < 60 * 1000) {
       return {
         success: false,
         syncId,
@@ -509,13 +509,6 @@ export class MonitoringService {
         throw new Error('Răspunsul serverului nu conține date (empty body)');
       }
 
-      // Read stream chunk by chunk, accumulating up to batchLimit valid candidate records
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-      let lineIndex = 0;
-      let isHeader = true;
-
       interface CandidateRecord {
         lineIndex: number;
         cui: number;
@@ -535,29 +528,19 @@ export class MonitoringService {
       const candidates: CandidateRecord[] = [];
       const effectiveBatchLimit = Math.min(Math.max(1, batchLimit), 25);
 
-      readLoop: while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      // Fast-path for edge-hosted recent registrations feed
+      if (streamUrl.includes('/data/onrc_recent_registrations.csv')) {
+        const fullText = await res.text();
+        const allLines = fullText.split('\n');
+        let idx = startCursor > 0 ? startCursor : 1;
+        if (idx === 0) idx = 1;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || ''; // Keep remainder in buffer
+        while (idx < allLines.length && candidates.length < effectiveBatchLimit) {
+          const line = allLines[idx];
+          idx++;
+          currentCursor = idx;
+          if (!line || !line.trim()) continue;
 
-        for (const line of lines) {
-          lineIndex++;
-          if (lineIndex === 1) {
-            isHeader = false;
-            continue; // Skip CSV header
-          }
-
-          // Resume after cursor if applicable, but wrap around if at EOF
-          if (startCursor > 0 && lineIndex <= startCursor) {
-            continue;
-          }
-
-          currentCursor = lineIndex;
-
-          if (!line.trim()) continue;
           const parts = this.parseCsvLine(line, '^');
           if (parts.length < 4) {
             rejectedCount++;
@@ -583,7 +566,6 @@ export class MonitoringService {
             continue;
           }
 
-          // Parse Date (DD/MM/YYYY HH:MM:SS or DD/MM/YYYY)
           let isoDate: string | null = null;
           if (rawDate.includes('/')) {
             const dateOnly = rawDate.split(' ')[0];
@@ -596,7 +578,7 @@ export class MonitoringService {
           }
 
           candidates.push({
-            lineIndex,
+            lineIndex: idx,
             cui,
             rawName,
             rawRegCom,
@@ -610,12 +592,89 @@ export class MonitoringService {
             rawWebsite,
             isoDate,
           });
+        }
+      } else {
+        // Stream reader fallback for large external streams
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+        let lineIndex = 0;
 
-          if (candidates.length >= effectiveBatchLimit) {
-            try {
-              await reader.cancel();
-            } catch {}
-            break readLoop;
+        readLoop: while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || ''; // Keep remainder in buffer
+
+          for (const line of lines) {
+            lineIndex++;
+            if (lineIndex === 1) continue; // Skip CSV header
+
+            if (startCursor > 0 && lineIndex <= startCursor) continue;
+
+            currentCursor = lineIndex;
+            if (!line.trim()) continue;
+
+            const parts = this.parseCsvLine(line, '^');
+            if (parts.length < 4) {
+              rejectedCount++;
+              continue;
+            }
+
+            const rawName = parts[0]?.trim();
+            const rawCui = parts[1]?.trim();
+            const rawRegCom = parts[2]?.trim();
+            const rawDate = parts[3]?.trim();
+            const rawEuid = parts[4]?.trim() || '';
+            const rawLegalForm = parts[5]?.trim() || '';
+            const rawCountry = parts[6]?.trim() || 'România';
+            const rawCounty = parts[7]?.trim() || '';
+            const rawCity = parts[8]?.trim() || '';
+            const rawStreet = parts[9]?.trim() || '';
+            const rawStreetNr = parts[10]?.trim() || '';
+            const rawWebsite = parts[18]?.trim() || '';
+
+            const cui = parseInt(rawCui, 10);
+            if (!cui || cui <= 0 || !rawName) {
+              rejectedCount++;
+              continue;
+            }
+
+            let isoDate: string | null = null;
+            if (rawDate.includes('/')) {
+              const dateOnly = rawDate.split(' ')[0];
+              const dparts = dateOnly.split('/');
+              if (dparts.length === 3) {
+                isoDate = `${dparts[2]}-${dparts[1].padStart(2, '0')}-${dparts[0].padStart(2, '0')}`;
+              }
+            } else if (rawDate.includes('-')) {
+              isoDate = rawDate.split(' ')[0];
+            }
+
+            candidates.push({
+              lineIndex,
+              cui,
+              rawName,
+              rawRegCom,
+              rawEuid,
+              rawLegalForm,
+              rawCountry,
+              rawCounty,
+              rawCity,
+              rawStreet,
+              rawStreetNr,
+              rawWebsite,
+              isoDate,
+            });
+
+            if (candidates.length >= effectiveBatchLimit) {
+              try {
+                await reader.cancel();
+              } catch {}
+              break readLoop;
+            }
           }
         }
       }
@@ -747,75 +806,91 @@ export class MonitoringService {
 
       // 3. Automatic Immediate ANAF v9 Verification for newly discovered companies (up to 10)
       if (newCuisForVerification.length > 0) {
-        try {
-          const verifySlice = newCuisForVerification.slice(0, 10);
-          const anafResults = await anafConnector.fetchBatchTaxStatus(verifySlice);
-          const anafStatements: { sql: string; params: any[] }[] = [];
+        const enrichFn = async () => {
+          try {
+            const verifySlice = newCuisForVerification.slice(0, 10);
+            const anafResults = await anafConnector.fetchBatchTaxStatus(verifySlice);
+            const anafStatements: { sql: string; params: any[] }[] = [];
 
-          for (const item of anafResults) {
-            const fiscalStatus = item.statusInactivi
-              ? 'FISCALLY_INACTIVE'
-              : item.dataReactivare
-              ? 'REACTIVATED'
-              : 'FISCALLY_ACTIVE';
+            for (const item of anafResults) {
+              const fiscalStatus = item.statusInactivi
+                ? 'FISCALLY_INACTIVE'
+                : item.dataReactivare
+                ? 'REACTIVATED'
+                : 'FISCALLY_ACTIVE';
 
-            let verificationState = 'FISCAL_STATUS_VERIFIED';
+              let verificationState = 'FISCAL_STATUS_VERIFIED';
 
-            // Insert contacts returned by ANAF
-            let hasContact = false;
-            for (const contact of item.discoveredContacts) {
-              const val = contact.normalizedValue || contact.originalValue;
-              if (val) {
-                hasContact = true;
-                anafStatements.push({
-                  sql: `INSERT OR IGNORE INTO contact_records (
-                          cui, contact_type, contact_value, normalized_value, label,
-                          source_name, verification_status, confidence_score,
-                          notes, discovered_at
-                        ) VALUES (?, ?, ?, ?, ?, 'ANAF_OPEN_DATA', 'DECLARED_BY_COMPANY', 0.90, 'Număr declarat oficial la administrația fiscală', datetime('now'))`,
-                  params: [
-                    item.cui,
-                    contact.contactType,
-                    val,
-                    contact.normalizedValue || val,
-                    contact.label || 'OFFICIAL',
-                  ],
-                });
+              // Insert contacts returned by ANAF
+              let hasContact = false;
+              for (const contact of item.discoveredContacts) {
+                const val = contact.normalizedValue || contact.originalValue;
+                if (val) {
+                  hasContact = true;
+                  anafStatements.push({
+                    sql: `INSERT OR IGNORE INTO contact_records (
+                            cui, contact_type, contact_value, normalized_value, label,
+                            source_name, verification_status, confidence_score,
+                            notes, discovered_at
+                          ) VALUES (?, ?, ?, ?, ?, 'ANAF_OPEN_DATA', 'DECLARED_BY_COMPANY', 0.90, 'Număr declarat oficial la administrația fiscală', datetime('now'))`,
+                    params: [
+                      item.cui,
+                      contact.contactType,
+                      val,
+                      contact.normalizedValue || val,
+                      contact.label || 'OFFICIAL',
+                    ],
+                  });
+                }
               }
+
+              if (hasContact) {
+                verificationState = 'CONTACT_AVAILABLE';
+              }
+
+              // Update company with verified fiscal & contact data
+              anafStatements.push({
+                sql: `UPDATE companies SET 
+                        fiscal_status = ?,
+                        ro_e_factura = ?,
+                        primary_caen = COALESCE(?, primary_caen),
+                        verification_state = ?,
+                        last_status_check_at = datetime('now'),
+                        status_verification_source = 'ANAF_TVA_REST_V9'
+                      WHERE cui = ?`,
+                params: [fiscalStatus, item.statusRO_e_Factura ? 1 : 0, item.cod_CAEN || null, verificationState, item.cui],
+              });
+
+              // Log status evidence
+              anafStatements.push({
+                sql: `INSERT INTO company_status_evidence (
+                        cui, source_name, source_url, query_timestamp, status_returned,
+                        verification_method, last_successful_verification, verified_by
+                      ) VALUES (?, 'ANAF_TVA_REST_V9', 'https://webservicesp.anaf.ro/api/PlatitorTvaRest/v9/tva', datetime('now'), ?, 'API_REST_V9', datetime('now'), 'AUTOMATED_MONITORING')`,
+                params: [item.cui, fiscalStatus],
+              });
             }
 
-            if (hasContact) {
-              verificationState = 'CONTACT_AVAILABLE';
+            if (anafStatements.length > 0) {
+              await executeBatch(anafStatements);
             }
-
-            // Update company with verified fiscal & contact data
-            anafStatements.push({
-              sql: `UPDATE companies SET 
-                      fiscal_status = ?,
-                      ro_e_factura = ?,
-                      primary_caen = COALESCE(?, primary_caen),
-                      verification_state = ?,
-                      last_status_check_at = datetime('now'),
-                      status_verification_source = 'ANAF_TVA_REST_V9'
-                    WHERE cui = ?`,
-              params: [fiscalStatus, item.statusRO_e_Factura ? 1 : 0, item.cod_CAEN || null, verificationState, item.cui],
-            });
-
-            // Log status evidence
-            anafStatements.push({
-              sql: `INSERT INTO company_status_evidence (
-                      cui, source_name, source_url, query_timestamp, status_returned,
-                      verification_method, last_successful_verification, verified_by
-                    ) VALUES (?, 'ANAF_TVA_REST_V9', 'https://webservicesp.anaf.ro/api/PlatitorTvaRest/v9/tva', datetime('now'), ?, 'API_REST_V9', datetime('now'), 'AUTOMATED_MONITORING')`,
-              params: [item.cui, fiscalStatus],
-            });
+          } catch (anafErr) {
+            console.warn('[MonitoringService] Automatic ANAF enrichment non-blocking error:', anafErr);
           }
+        };
 
-          if (anafStatements.length > 0) {
-            await executeBatch(anafStatements);
-          }
-        } catch (anafErr) {
-          console.warn('[MonitoringService] Automatic ANAF enrichment non-blocking error:', anafErr);
+        let workerCtx: any = null;
+        try {
+          const { getCloudflareContext } = require('@opennextjs/cloudflare');
+          workerCtx = getCloudflareContext()?.ctx;
+        } catch {}
+
+        if (workerCtx && typeof workerCtx.waitUntil === 'function') {
+          workerCtx.waitUntil(enrichFn());
+        } else {
+          try {
+            await enrichFn();
+          } catch {}
         }
       }
 

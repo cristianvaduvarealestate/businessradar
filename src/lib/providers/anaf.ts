@@ -67,7 +67,7 @@ export class AnafTaxConnector implements CompanyDataProvider {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 25000);
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
 
       const res = await fetch(this.anafEndpoint, {
         method: 'POST',
