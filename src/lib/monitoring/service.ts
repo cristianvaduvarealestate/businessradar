@@ -1,4 +1,4 @@
-import { queryAll, queryOne, executeRun } from '@/lib/db';
+import { queryAll, queryOne, executeRun, executeBatch } from '@/lib/db';
 import { anafConnector } from '@/lib/providers/anaf';
 import { ContactNormalizer } from '@/lib/enrichment/normalizer';
 import { InsuranceIntelligenceService } from '@/lib/insurance/intelligence';
@@ -68,7 +68,7 @@ export interface SyncResult {
 }
 
 const DEFAULT_ONRC_PACKAGE_URL =
-  'https://data.gov.ro/dataset/c2c88c9d-4824-45f1-90ec-656f1c0d8785/resource/869eac01-8480-4ac6-a18d-d0f044b0db80/download/od_firme.csv';
+  'https://businessradar.cristianvaduva.com/data/onrc_recent_registrations.csv';
 
 export class MonitoringService {
   /**
@@ -396,15 +396,34 @@ export class MonitoringService {
     try {
       // 2. Discover package or use stream URL
       const streamUrl = options?.datasetUrl || DEFAULT_ONRC_PACKAGE_URL;
+      let res: Response;
 
-      // Stream lines from data.gov.ro
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout
+      // If fetching from local static assets, use env.ASSETS to avoid Cloudflare loopback 522
+      let assetsBinding: any = null;
+      try {
+        const { getCloudflareContext } = require('@opennextjs/cloudflare');
+        const ctx = getCloudflareContext();
+        if (ctx?.env?.ASSETS) {
+          assetsBinding = ctx.env.ASSETS;
+        }
+      } catch {}
 
-      const res = await fetch(streamUrl, {
-        headers: { 'User-Agent': 'RadarBusinessRomania/2.0 (Continuous Company Discovery Engine)' },
-        signal: controller.signal,
-      });
+      if (!assetsBinding) {
+        const globalObj = globalThis as any;
+        assetsBinding = globalObj.env?.ASSETS || globalObj.__ENV__?.ASSETS;
+      }
+
+      if (assetsBinding && streamUrl.includes('/data/onrc_recent_registrations.csv')) {
+        res = await assetsBinding.fetch(new Request(streamUrl));
+      } else {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+        res = await fetch(streamUrl, {
+          headers: { 'User-Agent': 'RadarBusinessRomania/2.0 (Continuous Company Discovery Engine)' },
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+      }
 
       if (!res.ok) {
         throw new Error(`HTTP ${res.status} la conectarea cu depozitul data.gov.ro (${streamUrl})`);
@@ -414,12 +433,31 @@ export class MonitoringService {
         throw new Error('Răspunsul serverului nu conține date (empty body)');
       }
 
-      // Read stream chunk by chunk, splitting lines
+      // Read stream chunk by chunk, accumulating up to batchLimit valid candidate records
       const reader = res.body.getReader();
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
       let lineIndex = 0;
       let isHeader = true;
+
+      interface CandidateRecord {
+        lineIndex: number;
+        cui: number;
+        rawName: string;
+        rawRegCom: string;
+        rawEuid: string;
+        rawLegalForm: string;
+        rawCountry: string;
+        rawCounty: string;
+        rawCity: string;
+        rawStreet: string;
+        rawStreetNr: string;
+        rawWebsite: string;
+        isoDate: string | null;
+      }
+
+      const candidates: CandidateRecord[] = [];
+      const effectiveBatchLimit = Math.min(Math.max(1, batchLimit), 25);
 
       readLoop: while (true) {
         const { done, value } = await reader.read();
@@ -481,79 +519,109 @@ export class MonitoringService {
             isoDate = rawDate.split(' ')[0];
           }
 
-          const monitoringState = (config.monitoring_state || 'NOT_ACTIVATED') as MonitoringState;
-          const activationDate = config.monitoring_activation_date || null;
-          const baselineCutoff = config.baseline_backfill_cutoff || '2026-08-15';
+          candidates.push({
+            lineIndex,
+            cui,
+            rawName,
+            rawRegCom,
+            rawEuid,
+            rawLegalForm,
+            rawCountry,
+            rawCounty,
+            rawCity,
+            rawStreet,
+            rawStreetNr,
+            rawWebsite,
+            isoDate,
+          });
 
-          // Check if company already exists in database
-          const existing = await queryOne<{ cui: number; classification: string }>(
-            'SELECT cui, classification FROM companies WHERE cui = ?',
-            [cui]
-          );
+          if (candidates.length >= effectiveBatchLimit) {
+            try {
+              await reader.cancel();
+            } catch {}
+            break readLoop;
+          }
+        }
+      }
 
-          // Apply explicit cohort classification
+      // Process candidates in ONE batch to prevent Worker subrequest exhaustion
+      if (candidates.length > 0) {
+        const candidateCuis = candidates.map((c) => c.cui);
+        const placeholders = candidateCuis.map(() => '?').join(',');
+        const existingRows = await queryAll<{ cui: number; classification: string }>(
+          `SELECT cui, classification FROM companies WHERE cui IN (${placeholders})`,
+          candidateCuis
+        );
+        const existingMap = new Map(existingRows.map((r) => [r.cui, r.classification]));
+
+        const monitoringState = (config.monitoring_state || 'NOT_ACTIVATED') as MonitoringState;
+        const activationDate = config.monitoring_activation_date || null;
+        const baselineCutoff = config.baseline_backfill_cutoff || '2026-08-15';
+
+        const statements: { sql: string; params: any[] }[] = [];
+
+        for (const cand of candidates) {
+          const isExisting = existingMap.has(cand.cui);
           const classification = MonitoringService.classifyCohort(
-            isoDate || '',
+            cand.isoDate || '',
             monitoringState,
             activationDate,
-            !!existing,
+            isExisting,
             baselineCutoff
           );
 
-          if (existing) {
-            // Update existing company metadata without overwriting CRM or verified data
-            await executeRun(
-              `UPDATE companies SET 
-                reg_com = COALESCE(NULLIF(reg_com, ''), ?),
-                euid = COALESCE(NULLIF(euid, ''), ?),
-                legal_form = COALESCE(NULLIF(legal_form, ''), ?),
-                county = COALESCE(NULLIF(county, ''), ?),
-                city = COALESCE(NULLIF(city, ''), ?),
-                registration_date = COALESCE(registration_date, ?),
-                last_observed_at = datetime('now')
-               WHERE cui = ?`,
-              [rawRegCom, rawEuid, rawLegalForm, rawCounty, rawCity, isoDate, cui]
-            );
+          if (isExisting) {
+            statements.push({
+              sql: `UPDATE companies SET 
+                      reg_com = COALESCE(NULLIF(reg_com, ''), ?),
+                      euid = COALESCE(NULLIF(euid, ''), ?),
+                      legal_form = COALESCE(NULLIF(legal_form, ''), ?),
+                      county = COALESCE(NULLIF(county, ''), ?),
+                      city = COALESCE(NULLIF(city, ''), ?),
+                      registration_date = COALESCE(registration_date, ?),
+                      last_observed_at = datetime('now')
+                    WHERE cui = ?`,
+              params: [cand.rawRegCom, cand.rawEuid, cand.rawLegalForm, cand.rawCounty, cand.rawCity, cand.isoDate, cand.cui],
+            });
             updatedCount++;
           } else {
-            // Insert newly discovered company
-            const derived = this.deriveCaen(rawName, rawLegalForm);
+            const derived = this.deriveCaen(cand.rawName, cand.rawLegalForm);
             const qual = this.assessQualification({
               caen: derived.caen,
               legalStatus: 'ACTIVE',
               fiscalStatus: 'UNKNOWN',
               hasPhone: false,
               hasEmail: false,
-              registrationDate: isoDate || undefined,
+              registrationDate: cand.isoDate || undefined,
             });
 
-            await executeRun(
-              `INSERT INTO companies (
-                cui, name, normalized_name, reg_com, euid, legal_form,
-                incorporation_date, registration_date, first_detected_at,
-                country, county, city, street, street_nr, website,
-                primary_caen, caen_description,
-                legal_status, fiscal_status,
-                classification, verification_state, qualification_status, qualification_notes, insurance_relevance,
-                discovery_source, discovery_batch_id,
-                created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 'UNKNOWN', ?, 'DISCOVERED', ?, ?, ?, 'ONRC_DATA_GOV', ?, datetime('now'), datetime('now'))`,
-              [
-                cui,
-                rawName,
-                rawName.toUpperCase(),
-                rawRegCom,
-                rawEuid,
-                rawLegalForm,
-                isoDate,
-                isoDate,
+            statements.push({
+              sql: `INSERT INTO companies (
+                      cui, name, normalized_name, reg_com, euid, legal_form,
+                      incorporation_date, registration_date, first_detected_at,
+                      country, county, city, street, street_nr, website,
+                      primary_caen, caen_description,
+                      legal_status, fiscal_status,
+                      classification, verification_state, qualification_status, qualification_notes, insurance_relevance,
+                      discovery_source, discovery_batch_id,
+                      created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVE', 'UNKNOWN', ?, 'DISCOVERED', ?, ?, ?, 'ONRC_DATA_GOV', ?, datetime('now'), datetime('now'))`,
+              params: [
+                cand.cui,
+                cand.rawName,
+                cand.rawName.toUpperCase(),
+                cand.rawRegCom,
+                cand.rawEuid,
+                cand.rawLegalForm,
+                cand.isoDate,
+                cand.isoDate,
                 nowIso,
-                rawCountry,
-                rawCounty,
-                rawCity,
-                rawStreet,
-                rawStreetNr,
-                rawWebsite || null,
+                cand.rawCountry,
+                cand.rawCounty,
+                cand.rawCity,
+                cand.rawStreet,
+                cand.rawStreetNr,
+                cand.rawWebsite || null,
                 derived.caen,
                 derived.description,
                 classification,
@@ -561,58 +629,52 @@ export class MonitoringService {
                 qual.notes,
                 qual.insuranceRelevance,
                 syncId,
-              ]
-            );
+              ],
+            });
 
-            // Seed initial prospect pipeline status
-            await executeRun(
-              `INSERT OR IGNORE INTO prospect_pipeline (cui, status, priority, updated_at)
-               VALUES (?, 'NEW_DISCOVERED', 'STANDARD', datetime('now'))`,
-              [cui]
-            );
+            statements.push({
+              sql: `INSERT OR IGNORE INTO prospect_pipeline (cui, status, priority, updated_at)
+                    VALUES (?, 'NEW_DISCOVERED', 'STANDARD', datetime('now'))`,
+              params: [cand.cui],
+            });
 
-            // Generate initial insurance opportunities
             const profile = InsuranceIntelligenceService.getProfileForCaen(derived.caen);
             if (profile && profile.recommendedProducts.length > 0) {
               for (const prod of profile.recommendedProducts) {
-                await executeRun(
-                  `INSERT OR IGNORE INTO insurance_opportunities (
-                    cui, product_category, product_name, trigger_event,
-                    supporting_evidence, rationale, additional_info_needed,
-                    confidence_level, estimated_priority
-                  ) VALUES (?, ?, ?, ?, ?, ?, ?, 0.85, 'HIGH')`,
-                  [
-                    cui,
+                statements.push({
+                  sql: `INSERT OR IGNORE INTO insurance_opportunities (
+                          cui, product_category, product_name, trigger_event,
+                          supporting_evidence, rationale, additional_info_needed,
+                          confidence_level, estimated_priority
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 0.85, 'HIGH')`,
+                  params: [
+                    cand.cui,
                     prod.productCategory,
                     prod.productName,
-                    `Înființare companie nouă: ${rawName} (${derived.caen})`,
+                    `Înființare companie nouă: ${cand.rawName} (${derived.caen})`,
                     `Activitate declarată în sectorul ${profile.industryName}`,
                     prod.whyRelevant,
                     prod.underwritingCaveat,
-                  ]
-                );
+                  ],
+                });
               }
             }
 
             discoveredCount++;
-            newCuisForVerification.push(cui);
-
-            // Stop reading if batch limit reached for newly discovered companies
-            if (discoveredCount >= batchLimit) {
-              controller.abort();
-              break readLoop;
-            }
+            newCuisForVerification.push(cand.cui);
           }
         }
-      }
 
-      clearTimeout(timeoutId);
+        // Execute all inserts/updates in a single atomic batch query
+        await executeBatch(statements);
+      }
 
       // 3. Automatic Immediate ANAF v9 Verification for newly discovered companies (up to 10)
       if (newCuisForVerification.length > 0) {
         try {
           const verifySlice = newCuisForVerification.slice(0, 10);
           const anafResults = await anafConnector.fetchBatchTaxStatus(verifySlice);
+          const anafStatements: { sql: string; params: any[] }[] = [];
 
           for (const item of anafResults) {
             const fiscalStatus = item.statusInactivi
@@ -629,20 +691,20 @@ export class MonitoringService {
               const val = contact.normalizedValue || contact.originalValue;
               if (val) {
                 hasContact = true;
-                await executeRun(
-                  `INSERT OR IGNORE INTO contact_records (
-                    cui, contact_type, contact_value, normalized_value, label,
-                    source_name, verification_status, confidence_score,
-                    notes, discovered_at
-                  ) VALUES (?, ?, ?, ?, ?, 'ANAF_OPEN_DATA', 'DECLARED_BY_COMPANY', 0.90, 'Număr declarat oficial la administrația fiscală', datetime('now'))`,
-                  [
+                anafStatements.push({
+                  sql: `INSERT OR IGNORE INTO contact_records (
+                          cui, contact_type, contact_value, normalized_value, label,
+                          source_name, verification_status, confidence_score,
+                          notes, discovered_at
+                        ) VALUES (?, ?, ?, ?, ?, 'ANAF_OPEN_DATA', 'DECLARED_BY_COMPANY', 0.90, 'Număr declarat oficial la administrația fiscală', datetime('now'))`,
+                  params: [
                     item.cui,
                     contact.contactType,
                     val,
                     contact.normalizedValue || val,
                     contact.label || 'OFFICIAL',
-                  ]
-                );
+                  ],
+                });
               }
             }
 
@@ -651,26 +713,30 @@ export class MonitoringService {
             }
 
             // Update company with verified fiscal & contact data
-            await executeRun(
-              `UPDATE companies SET 
-                fiscal_status = ?,
-                ro_e_factura = ?,
-                primary_caen = COALESCE(?, primary_caen),
-                verification_state = ?,
-                last_status_check_at = datetime('now'),
-                status_verification_source = 'ANAF_TVA_REST_V9'
-               WHERE cui = ?`,
-              [fiscalStatus, item.statusRO_e_Factura ? 1 : 0, item.cod_CAEN || null, verificationState, item.cui]
-            );
+            anafStatements.push({
+              sql: `UPDATE companies SET 
+                      fiscal_status = ?,
+                      ro_e_factura = ?,
+                      primary_caen = COALESCE(?, primary_caen),
+                      verification_state = ?,
+                      last_status_check_at = datetime('now'),
+                      status_verification_source = 'ANAF_TVA_REST_V9'
+                    WHERE cui = ?`,
+              params: [fiscalStatus, item.statusRO_e_Factura ? 1 : 0, item.cod_CAEN || null, verificationState, item.cui],
+            });
 
             // Log status evidence
-            await executeRun(
-              `INSERT INTO company_status_evidence (
-                cui, source_name, source_url, query_timestamp, status_returned,
-                verification_method, last_successful_verification, verified_by
-              ) VALUES (?, 'ANAF_TVA_REST_V9', 'https://webservicesp.anaf.ro/api/PlatitorTvaRest/v9/tva', datetime('now'), ?, 'API_REST_V9', datetime('now'), 'AUTOMATED_MONITORING')`,
-              [item.cui, fiscalStatus]
-            );
+            anafStatements.push({
+              sql: `INSERT INTO company_status_evidence (
+                      cui, source_name, source_url, query_timestamp, status_returned,
+                      verification_method, last_successful_verification, verified_by
+                    ) VALUES (?, 'ANAF_TVA_REST_V9', 'https://webservicesp.anaf.ro/api/PlatitorTvaRest/v9/tva', datetime('now'), ?, 'API_REST_V9', datetime('now'), 'AUTOMATED_MONITORING')`,
+              params: [item.cui, fiscalStatus],
+            });
+          }
+
+          if (anafStatements.length > 0) {
+            await executeBatch(anafStatements);
           }
         } catch (anafErr) {
           console.warn('[MonitoringService] Automatic ANAF enrichment non-blocking error:', anafErr);

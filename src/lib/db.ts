@@ -72,6 +72,35 @@ export async function executeRun(
   return { success: false, changes: 0 };
 }
 
+export async function executeBatch(
+  statements: { sql: string; params?: any[] }[]
+): Promise<{ success: boolean; changes: number }> {
+  if (!statements || statements.length === 0) return { success: true, changes: 0 };
+  const d1 = getD1Database();
+  if (d1) {
+    const stmts = statements.map((s) =>
+      s.params && s.params.length > 0 ? d1.prepare(s.sql).bind(...s.params) : d1.prepare(s.sql)
+    );
+    const results = await d1.batch(stmts);
+    const totalChanges = results.reduce((acc: number, r: any) => acc + (r.meta?.changes ?? 0), 0);
+    return { success: true, changes: totalChanges };
+  }
+  const db = getDatabase();
+  if (db && typeof db.prepare === 'function') {
+    const runInTransaction = db.transaction((stmts: any[]) => {
+      let changes = 0;
+      for (const s of stmts) {
+        const res = db.prepare(s.sql).run(...(s.params || []));
+        changes += res.changes ?? 0;
+      }
+      return changes;
+    });
+    const changes = runInTransaction(statements);
+    return { success: true, changes };
+  }
+  return { success: false, changes: 0 };
+}
+
 function isNodeEnvironment(): boolean {
   return (
     typeof process !== 'undefined' &&
