@@ -44,6 +44,17 @@ interface ProspectDossierDrawerProps {
   onRecordUpdated?: () => void;
 }
 
+function formatSafeDateTime(d: string | null | undefined): string {
+  if (!d) return '—';
+  try {
+    const parsed = new Date(d);
+    if (isNaN(parsed.getTime())) return '—';
+    return parsed.toLocaleString('ro-RO');
+  } catch {
+    return '—';
+  }
+}
+
 export default function ProspectDossierDrawer({
   prospectId,
   isOpen,
@@ -738,7 +749,7 @@ export default function ProspectDossierDrawer({
                           )}
                         </div>
                         <span className="text-[11px] text-titanium-500 font-mono">
-                          {new Date(disc.interaction_date).toLocaleString('ro-RO')}
+                          {formatSafeDateTime(disc.interaction_date)}
                         </span>
                       </div>
 
@@ -771,7 +782,7 @@ export default function ProspectDossierDrawer({
                               <Clock3 className="w-3 h-3 text-amber-400" />
                               <span className="text-titanium-500">Revenire: </span>
                               <span className="text-amber-300">
-                                {new Date(disc.next_callback_date).toLocaleString('ro-RO')}
+                                {formatSafeDateTime(disc.next_callback_date)}
                               </span>
                             </div>
                           )}

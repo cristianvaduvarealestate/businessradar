@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, use } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, useParams } from 'next/navigation';
 import {
   Search,
   Filter,
@@ -36,31 +36,35 @@ import {
 } from '@/lib/prospecting-types';
 
 interface PageProps {
-  params: Promise<{ portfolio: string }>;
+  params?: { portfolio?: string };
+}
+
+function formatSafeDate(d: string | null | undefined): string {
+  if (!d) return '—';
+  try {
+    const parsed = new Date(d);
+    if (isNaN(parsed.getTime())) return '—';
+    return parsed.toLocaleDateString('ro-RO');
+  } catch {
+    return '—';
+  }
 }
 
 export default function ProspectingPortfolioPage({ params }: PageProps) {
-  const resolvedParams = use(params);
-  const portfolioParam = resolvedParams.portfolio?.toLowerCase();
+  const routeParams = useParams();
+  const rawPortfolio = (params?.portfolio || (routeParams?.portfolio as string) || '').toLowerCase();
 
-  let portfolioType: PortfolioType = 'GENERAL';
-  let title = 'Prospectare Generală';
-  let subtitle = 'Toate domeniile de activitate: clinici, construcții, transport, IT, producție, distribuție, servicii';
-  let sourceBadge = 'Sursa: Pasted text.txt (304 firme)';
-
-  if (portfolioParam === 'general') {
-    portfolioType = 'GENERAL';
-    title = 'Prospectare Generală';
-    subtitle = 'Companii din servicii, sănătate, construcții, logistică, auto, IT și distribuție';
-    sourceBadge = 'Sursa: Pasted text.txt';
-  } else if (portfolioParam === 'niche') {
-    portfolioType = 'NICHE_HORECA_AUTO_CONSTRUCT';
-    title = 'Hoteluri, pensiuni, rent-a-car și construcții';
-    subtitle = 'Portofoliu nișat: 25 companii cu date complete de contact, flote auto și sugestii de asigurare';
-    sourceBadge = 'Sursa: Pasted markdown (2).md (25 companii)';
-  } else {
-    notFound();
-  }
+  const isNiche = rawPortfolio === 'niche';
+  const portfolioType: PortfolioType = isNiche ? 'NICHE_HORECA_AUTO_CONSTRUCT' : 'GENERAL';
+  const title = isNiche
+    ? 'Hoteluri, pensiuni, rent-a-car și construcții'
+    : 'Prospectare Generală';
+  const subtitle = isNiche
+    ? 'Portofoliu nișat: 25 companii cu date complete de contact, flote auto și sugestii de asigurare'
+    : 'Companii din servicii, sănătate, construcții, logistică, auto, IT și distribuție';
+  const sourceBadge = isNiche
+    ? 'Sursa: Pasted markdown (2).md (25 companii)'
+    : 'Sursa: Pasted text.txt (304 firme)';
 
   const [loading, setLoading] = useState(true);
   const [records, setRecords] = useState<ProspectRecord[]>([]);
@@ -417,7 +421,7 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
                                 }`}
                               >
                                 <Clock3 className="w-3 h-3" />
-                                {new Date(r.next_callback_date).toLocaleDateString('ro-RO')}
+                                {formatSafeDate(r.next_callback_date)}
                               </div>
                               {r.next_action && (
                                 <div className="text-[10px] text-titanium-400 max-w-[140px] truncate" title={r.next_action}>
