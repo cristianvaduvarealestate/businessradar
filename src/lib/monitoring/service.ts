@@ -72,6 +72,53 @@ const DEFAULT_ONRC_PACKAGE_URL =
 
 export class MonitoringService {
   /**
+   * Verify if monitoring schema (migration 0012) has been initialized in the database.
+   * Read-only schema check that never throws.
+   */
+  static async checkSchemaInitialized(): Promise<{
+    initialized: boolean;
+    missingTables: string[];
+    missingColumns: string[];
+    underlyingError?: string;
+  }> {
+    try {
+      const rows = await queryAll<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('monitoring_config', 'monitoring_sync_logs', 'ingestion_nonces')"
+      );
+      const foundTables = new Set(rows.map((r) => r.name));
+      const requiredTables = ['monitoring_config', 'monitoring_sync_logs', 'ingestion_nonces'];
+      const missingTables = requiredTables.filter((t) => !foundTables.has(t));
+
+      // Also check if companies table has discovery columns (classification)
+      let missingColumns: string[] = [];
+      try {
+        const colRows = await queryAll<{ name: string }>("PRAGMA table_info(companies)");
+        const colSet = new Set(colRows.map((c) => c.name));
+        const requiredCols = ['classification', 'first_detected_at', 'verification_state'];
+        missingColumns = requiredCols.filter((c) => !colSet.has(c));
+      } catch {}
+
+      if (missingTables.length > 0 || missingColumns.length > 0) {
+        return {
+          initialized: false,
+          missingTables,
+          missingColumns,
+          underlyingError: `D1_ERROR: no such table: ${missingTables[0] || 'monitoring_config'}: SQLITE_ERROR`,
+        };
+      }
+
+      return { initialized: true, missingTables: [], missingColumns: [] };
+    } catch (e: any) {
+      return {
+        initialized: false,
+        missingTables: ['monitoring_config', 'monitoring_sync_logs', 'ingestion_nonces'],
+        missingColumns: ['classification'],
+        underlyingError: e?.message || 'D1_ERROR: no such table: monitoring_config: SQLITE_ERROR',
+      };
+    }
+  }
+
+  /**
    * Retrieve all configuration key-values
    */
   static async getConfig(): Promise<Record<string, string>> {
@@ -84,8 +131,17 @@ export class MonitoringService {
         config[r.key] = r.value;
       }
       return config;
-    } catch {
-      return {};
+    } catch (e: any) {
+      return {
+        _schema_status: 'MIGRATION_REQUIRED',
+        _schema_error: e?.message || 'D1_ERROR: no such table: monitoring_config: SQLITE_ERROR',
+        monitoring_state: 'NOT_INITIALIZED',
+        monitoring_status: 'MIGRATION_REQUIRED',
+        monitoring_activation_date: '',
+        last_sync_status: 'MIGRATION_REQUIRED',
+        total_discovered_count: '0',
+        stream_cursor_line: '0',
+      };
     }
   }
 
@@ -272,6 +328,21 @@ export class MonitoringService {
     const syncId = `sync_${Date.now()}`;
     const executionType = options?.executionType || 'MANUAL_ADMIN';
     const triggeredBy = options?.triggeredBy || 'system';
+
+    // 0. Verify Database Schema Initialization (Migration 0012 check)
+    const schemaCheck = await this.checkSchemaInitialized();
+    if (!schemaCheck.initialized) {
+      return {
+        success: false,
+        syncId,
+        discoveredCount: 0,
+        updatedCount: 0,
+        rejectedCount: 0,
+        cursorLine: 0,
+        message: `Schema bazei de date nu este inițializată pentru monitorizare continuă (lipsesc tabelele: ${schemaCheck.missingTables.join(', ') || 'monitoring_config'}). Este necesară aplicarea migrației 0012 pe Cloudflare D1.`,
+        error: 'MIGRATION_REQUIRED',
+      };
+    }
 
     // 1. Concurrency Check (atomic lock check)
     const config = await this.getConfig();

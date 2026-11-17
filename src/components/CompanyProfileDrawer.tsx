@@ -464,13 +464,13 @@ export default function CompanyProfileDrawer({
                               </span>
                               <span>•</span>
                               {c.verification_status === 'MANUALLY_CONFIRMED' ? (
-                                <span className="text-emerald-400 font-semibold">Confirmat manual (Apel CRM)</span>
-                              ) : c.verification_status === 'DECLARED_BY_COMPANY' ? (
-                                <span className="text-cyan-400 font-medium">Declarat de companie (Nediscutat)</span>
-                              ) : c.verification_status === 'OFFICIAL_WEBSITE' ? (
-                                <span className="text-purple-400 font-medium">Publicat pe website oficial</span>
+                                <span className="text-emerald-400 font-semibold">Confirmat prin apel</span>
+                              ) : c.verification_status === 'OFFICIAL_WEBSITE' || c.source_name === 'OFFICIAL_WEBSITE' ? (
+                                <span className="text-purple-400 font-medium">Publicat pe website</span>
+                              ) : c.verification_status === 'DECLARED_BY_COMPANY' || c.source_name === 'ANAF_OPEN_DATA' ? (
+                                <span className="text-cyan-400 font-medium">Declarat de companie (Neverificat)</span>
                               ) : (
-                                <span className="text-titanium-400">{c.verification_status || 'Format valid'}</span>
+                                <span className="text-titanium-400">Neverificat</span>
                               )}
                             </div>
                           </div>
@@ -498,7 +498,9 @@ export default function CompanyProfileDrawer({
                   </div>
                 ) : (
                   <div className="text-xs text-titanium-500 italic p-3 text-center">
-                    Niciun contact identificat în sursele publice încă.
+                    {detailData?.isNationalDirectoryOnly
+                      ? 'Niciun canal de contact direct disponibil în fișierul ONRC oficial. Promovează compania în CRM pentru căutare automată ANAF.'
+                      : 'Niciun canal de contact identificat în sursele publice încă.'}
                   </div>
                 )}
               </div>

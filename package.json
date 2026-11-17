@@ -14,7 +14,7 @@
     "db:init": "node scripts/init-db.js",
     "ingest:onrc": "node scripts/sync-onrc.js",
     "ingest:watchdog": "node scripts/run-watchdog.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test --test-concurrency=1 tests/*.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.5.0",

@@ -68,6 +68,10 @@ interface NewCompanyItem {
 }
 
 interface MonitoringOverview {
+  initialized?: boolean;
+  status?: string;
+  message?: string;
+  error?: string;
   config: Record<string, string>;
   stats: {
     today: number;
@@ -294,15 +298,45 @@ function NewCompaniesContent() {
 
             <button
               onClick={handleTriggerSync}
-              disabled={syncing}
-              className="px-4 py-2 rounded-lg bg-radar-green hover:bg-emerald-400 text-black font-bold text-xs flex items-center gap-2 transition-all shadow-md shadow-radar-green/10 disabled:opacity-50"
-              title="Lansează procesul real de monitorizare și scanare ONRC"
+              disabled={syncing || monitoring?.initialized === false}
+              className="px-4 py-2 rounded-lg bg-radar-green hover:bg-emerald-400 text-black font-bold text-xs flex items-center gap-2 transition-all shadow-md shadow-radar-green/10 disabled:opacity-50 disabled:cursor-not-allowed"
+              title={
+                monitoring?.initialized === false
+                  ? 'Sincronizarea necesită migrarea 0012 pe baza de date D1'
+                  : 'Lansează procesul real de monitorizare și scanare ONRC'
+              }
             >
               <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
               <span>{syncing ? 'Sincronizare în curs...' : 'Sincronizează acum'}</span>
             </button>
           </div>
         </div>
+
+        {/* Migration Required Warning Banner */}
+        {(monitoring?.initialized === false || monitoring?.status === 'MIGRATION_REQUIRED') && (
+          <div className="bg-amber-950/50 border-t border-b border-amber-500/40 px-4 sm:px-6 py-3">
+            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono">
+              <div className="flex items-start sm:items-center gap-2.5 text-amber-300">
+                <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5 sm:mt-0" />
+                <div>
+                  <div className="font-bold text-amber-200 flex items-center gap-2">
+                    <span>MIGRARE D1 ÎN AȘTEPTARE</span>
+                    <span className="px-1.5 py-0.2 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      0012_new_companies_and_monitoring.sql
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-amber-300/80 mt-0.5">
+                    {monitoring?.message || 'Tabela monitoring_config lipsește în baza de date la distanță D1.'}{' '}
+                    {monitoring?.error && <span className="opacity-75">({monitoring.error})</span>}
+                  </div>
+                </div>
+              </div>
+              <div className="shrink-0 text-[11px] text-amber-400 bg-amber-900/40 px-2.5 py-1 rounded border border-amber-500/30">
+                Așteaptă aprobare utilizator
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Sync Toast Notification */}
         {syncNotification && (

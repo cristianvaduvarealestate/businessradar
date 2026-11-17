@@ -42,6 +42,19 @@ export async function POST(request: NextRequest) {
       triggeredBy,
     });
 
+    if (!result.success && result.error === 'MIGRATION_REQUIRED') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'MIGRATION_REQUIRED',
+          code: 'SCHEMA_NOT_INITIALIZED',
+          message: result.message,
+          underlyingError: 'D1_ERROR: no such table: monitoring_config: SQLITE_ERROR',
+        },
+        { status: 503 }
+      );
+    }
+
     if (!result.success && result.error === 'CONCURRENT_SYNC_LOCKED') {
       return NextResponse.json(
         {

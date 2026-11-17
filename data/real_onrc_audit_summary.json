@@ -1,0 +1,10 @@
+{
+  "totalSourceRows": 4233074,
+  "uniqueValidCuis": 4041402,
+  "zeroCuiCount": 86427,
+  "duplicateCuiCount": 105245,
+  "malformedCount": 0,
+  "matchedHistoricalCuis": 2908,
+  "totalHistoricalCuis": 2908,
+  "durationSec": 3.851
+}

@@ -18,6 +18,31 @@ export async function GET(request: NextRequest) {
 
   try {
     const config = await MonitoringService.getConfig();
+
+    // If schema is not initialized (e.g. migration 0012 not applied to D1), return transparent status
+    if (config._schema_status === 'MIGRATION_REQUIRED') {
+      return NextResponse.json({
+        success: true,
+        initialized: false,
+        status: 'MIGRATION_REQUIRED',
+        message: 'Tabelele de monitorizare continuă nu sunt inițializate în baza de date (Migrația 0012 necesară).',
+        underlyingError: config._schema_error || 'D1_ERROR: no such table: monitoring_config: SQLITE_ERROR',
+        config,
+        stats: {
+          today: 0,
+          last_7_days: 0,
+          last_30_days: 0,
+          total_new: 0,
+          continuous_count: 0,
+          backfill_count: 0,
+          verified: 0,
+          awaiting: 0,
+          with_contacts: 0,
+        },
+        recentSyncs: [],
+      });
+    }
+
     const recentSyncs = await MonitoringService.getSyncLogs(10);
 
     // Compute stats for FIRME NOI (both CONTINUOUS and INITIAL BACKFILL cohorts)

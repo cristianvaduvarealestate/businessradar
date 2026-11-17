@@ -109,17 +109,22 @@ function CompaniesContent() {
   });
 
   // Filters
-  const [view, setView] = useState<'active' | 'all' | 'excluded' | 'unverified'>('active');
+  const [view, setView] = useState<'active' | 'all' | 'excluded' | 'unverified' | 'national'>('active');
   const [query, setQuery] = useState(searchParams?.get('q') || '');
   const [county, setCounty] = useState(searchParams?.get('county') || '');
   const [crmStatus, setCrmStatus] = useState(searchParams?.get('crmStatus') || '');
   const [contactFilter, setContactFilter] = useState('');
   const [activeKpiFilter, setActiveKpiFilter] = useState<string>('all_active');
 
+  // National DB stats and promotion state
+  const [nationalStats, setNationalStats] = useState<any>(null);
+  const [promotingCui, setPromotingCui] = useState<number | null>(null);
+  const [promoteNotification, setPromoteNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
   // Selected CUI for unified drawer
   const [selectedCui, setSelectedCui] = useState<number | null>(null);
 
-  // Fetch KPI Stats
+  // Fetch KPI Stats & National Stats
   const fetchStats = async () => {
     try {
       const res = await fetch('/api/stats');
@@ -130,44 +135,106 @@ function CompaniesContent() {
     } catch (e) {
       console.error('Error fetching stats:', e);
     }
+
+    try {
+      const natRes = await fetch('/api/national/stats');
+      const natJson = await natRes.json();
+      if (natJson.success && natJson.data) {
+        setNationalStats(natJson.data);
+      }
+    } catch {}
   };
 
-  // Fetch Companies List
+  // Fetch Companies List (routes between Operational D1 and National Database)
   const fetchCompanies = async (page = 1) => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: '25',
-        scope: 'historical',
-        view,
-      });
-
-      if (query) params.set('q', query);
-      if (county) params.set('county', county);
-      if (crmStatus) params.set('crmStatus', crmStatus);
-
-      if (contactFilter === 'mobile') params.set('hasMobile', 'true');
-      if (contactFilter === 'landline') params.set('hasLandline', 'true');
-      if (contactFilter === 'email') params.set('hasEmail', 'true');
-      if (contactFilter === 'website') params.set('hasWebsite', 'true');
-
-      const res = await fetch(`/api/companies?${params.toString()}`);
-      const data = await res.json();
-      if (data.success && data.data) {
-        setItems(data.data.items || []);
-        const pag = data.data.pagination || {};
-        setPagination({
-          page: pag.page || 1,
-          limit: pag.limit || 25,
-          total: typeof pag.total === 'number' ? pag.total : pag.totalItems || 0,
-          totalPages: pag.totalPages || 1,
+      if (view === 'national') {
+        const natParams = new URLSearchParams({
+          page: String(page),
+          limit: '25',
         });
+        if (query) natParams.set('q', query);
+        if (county) natParams.set('county', county);
+
+        const res = await fetch(`/api/national/search?${natParams.toString()}`);
+        const data = await res.json();
+        if (data.success && data.data) {
+          setItems(data.data.items || []);
+          const pag = data.data.pagination || {};
+          setPagination({
+            page: pag.page || 1,
+            limit: pag.limit || 25,
+            total: pag.total || 0,
+            totalPages: pag.totalPages || 1,
+          });
+        }
+      } else {
+        const params = new URLSearchParams({
+          page: String(page),
+          limit: '25',
+          scope: 'historical',
+          view,
+        });
+
+        if (query) params.set('q', query);
+        if (county) params.set('county', county);
+        if (crmStatus) params.set('crmStatus', crmStatus);
+
+        if (contactFilter === 'mobile') params.set('hasMobile', 'true');
+        if (contactFilter === 'landline') params.set('hasLandline', 'true');
+        if (contactFilter === 'email') params.set('hasEmail', 'true');
+        if (contactFilter === 'website') params.set('hasWebsite', 'true');
+
+        const res = await fetch(`/api/companies?${params.toString()}`);
+        const data = await res.json();
+        if (data.success && data.data) {
+          setItems(data.data.items || []);
+          const pag = data.data.pagination || {};
+          setPagination({
+            page: pag.page || 1,
+            limit: pag.limit || 25,
+            total: typeof pag.total === 'number' ? pag.total : pag.totalItems || 0,
+            totalPages: pag.totalPages || 1,
+          });
+        }
       }
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handlePromoteCompany = async (cui: number) => {
+    setPromotingCui(cui);
+    setPromoteNotification(null);
+    try {
+      const res = await fetch('/api/companies/promote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cui, autoVerifyAnaf: true }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPromoteNotification({
+          type: 'success',
+          message: data.data?.message || `Compania cu CUI ${cui} a fost promovată în CRM.`,
+        });
+        await fetchStats();
+      } else {
+        setPromoteNotification({
+          type: 'error',
+          message: data.message || 'Eroare la promovare',
+        });
+      }
+    } catch (err: any) {
+      setPromoteNotification({
+        type: 'error',
+        message: err.message || 'Eroare de rețea la promovare',
+      });
+    } finally {
+      setPromotingCui(null);
     }
   };
 
@@ -432,12 +499,95 @@ function CompaniesContent() {
             >
               <span>Neclasificate Legal (2.390)</span>
             </button>
+
+            <button
+              onClick={() => {
+                setView('national');
+                setActiveKpiFilter('national');
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                view === 'national'
+                  ? 'bg-blue-600 text-white shadow-sm font-bold border border-blue-400'
+                  : 'bg-titanium-800 hover:bg-titanium-700 text-titanium-300'
+              }`}
+              title="Caută direct în Baza Națională ONRC completă"
+            >
+              <Globe className="w-3.5 h-3.5 text-blue-400" />
+              <span>
+                Baza Națională ONRC ({nationalStats?.validCuiRecords ? nationalStats.validCuiRecords.toLocaleString('ro-RO') : '2.908'})
+              </span>
+            </button>
           </div>
 
           <div className="text-xs text-titanium-400 font-mono">
-            Rezultate: <strong className="text-white">{pagination.total}</strong> companii
+            {view === 'national' ? (
+              <span>Rezultate Naționale: <strong className="text-blue-400">{pagination.total}</strong> găsite</span>
+            ) : (
+              <span>Rezultate: <strong className="text-white">{pagination.total}</strong> companii</span>
+            )}
           </div>
         </div>
+
+        {/* Promotion Toast */}
+        {promoteNotification && (
+          <div className={`p-3 rounded-lg text-xs font-mono flex items-center justify-between border ${
+            promoteNotification.type === 'success' ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' : 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+          }`}>
+            <span>{promoteNotification.message}</span>
+            <button onClick={() => setPromoteNotification(null)} className="text-titanium-400 hover:text-white ml-2">✕</button>
+          </div>
+        )}
+
+        {/* National Dataset Telemetry Banner */}
+        {view === 'national' && (
+          <div className="bg-blue-950/40 border border-blue-500/30 rounded-lg p-3 text-xs font-mono space-y-1.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-blue-300 font-bold">
+                <Globe className="w-4 h-4 text-blue-400" />
+                <span>BAZA NAȚIONALĂ DE FIRME (SHARDING R2 / ONRC)</span>
+              </div>
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className={`px-2 py-0.5 rounded font-bold border ${
+                  nationalStats?.connected
+                    ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                    : 'bg-amber-950/60 border-amber-500/40 text-amber-300'
+                }`}>
+                  {nationalStats?.connected ? `ACTIV (${nationalStats?.storageDriver})` : 'R2 ÎN AȘTEPTARE CONFIGURARE'}
+                </span>
+                {nationalStats?.isComplete ? (
+                  <span className="text-emerald-400 font-semibold">• Dataset Complet</span>
+                ) : (
+                  <span className="text-amber-400 font-semibold">• Shards Valide</span>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-4 text-[11px] text-titanium-400 pt-1.5 border-t border-titanium-800">
+              <div>
+                Înregistrări verificate:{' '}
+                <strong className="text-white">
+                  {nationalStats?.totalValidRecords ? nationalStats.totalValidRecords.toLocaleString('ro-RO') : '2.908'}
+                </strong>
+              </div>
+              <div>
+                Publicație sursă:{' '}
+                <strong className="text-titanium-200">
+                  {nationalStats?.publicationDate || '2026-11-06'}
+                </strong>
+              </div>
+              <div>
+                Versiune:{' '}
+                <strong className="text-titanium-200">
+                  {nationalStats?.datasetVersion || '2026.11.06-v1'}
+                </strong>
+              </div>
+              {nationalStats?.sourceSha256 && (
+                <div className="truncate max-w-xs" title={nationalStats.sourceSha256}>
+                  SHA-256: <span className="font-mono text-titanium-500">{nationalStats.sourceSha256.slice(0, 16)}...</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Row 2: Search Input & Dropdown Filters */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
@@ -697,15 +847,30 @@ function CompaniesContent() {
 
                     {/* Acțiune */}
                     <td className="p-3.5 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedCui(item.cui);
-                        }}
-                        className="px-2.5 py-1.5 rounded-lg bg-titanium-800 hover:bg-radar-green hover:text-black text-titanium-200 text-xs font-semibold transition-colors"
-                      >
-                        Profil
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        {view === 'national' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePromoteCompany(item.cui);
+                            }}
+                            disabled={promotingCui === item.cui}
+                            className="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-semibold transition-colors disabled:opacity-50 flex items-center gap-1 shadow-sm"
+                            title="Promovează această companie în CRM-ul operațional"
+                          >
+                            <span>{promotingCui === item.cui ? '...' : '+ CRM'}</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedCui(item.cui);
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-titanium-800 hover:bg-radar-green hover:text-black text-titanium-200 text-xs font-semibold transition-colors"
+                        >
+                          Profil
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))

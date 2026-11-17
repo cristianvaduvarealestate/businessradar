@@ -16,8 +16,15 @@ dist/
 
 # Production
 data/*.db*
+data/*.CSV
+data/*.csv
+data/national_shards/
+data/national_shards_v2/
+data/test_shards/
+data/*.jsonl
 data/backups/
 !data/.gitkeep
+!data/onrc_real_stream.csv
 temp/
 downloads/
 

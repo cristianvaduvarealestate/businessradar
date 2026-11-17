@@ -783,15 +783,23 @@ export default function CompanyDetailPage() {
                           {c.contact_type} ({c.label || 'OFFICE'})
                         </span>
                         <span
-                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                            c.verification_status === 'OFFICIAL_REGISTER' ||
-                            c.verification_status === 'OFFICIAL_WEBSITE' ||
+                          className={`text-[9px] font-bold px-2 py-0.5 rounded border ${
                             c.verification_status === 'MANUALLY_CONFIRMED'
-                              ? 'bg-emerald-500/20 text-emerald-400'
-                              : 'bg-blue-500/20 text-blue-400'
+                              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                              : c.verification_status === 'OFFICIAL_WEBSITE' || c.source_name === 'OFFICIAL_WEBSITE'
+                              ? 'bg-purple-500/20 text-purple-300 border-purple-500/30'
+                              : c.verification_status === 'DECLARED_BY_COMPANY' || c.source_name === 'ANAF_OPEN_DATA'
+                              ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+                              : 'bg-titanium-800 text-titanium-400 border-titanium-700'
                           }`}
                         >
-                          {c.verification_status}
+                          {c.verification_status === 'MANUALLY_CONFIRMED'
+                            ? 'Confirmat prin apel'
+                            : c.verification_status === 'OFFICIAL_WEBSITE' || c.source_name === 'OFFICIAL_WEBSITE'
+                            ? 'Publicat pe website'
+                            : c.verification_status === 'DECLARED_BY_COMPANY' || c.source_name === 'ANAF_OPEN_DATA'
+                            ? 'Declarat de companie (Neverificat)'
+                            : 'Neverificat'}
                         </span>
                       </div>
 
