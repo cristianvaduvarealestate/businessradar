@@ -67,6 +67,14 @@ export function getAdminPasskey(): string {
 }
 
 /**
+ * Retrieves the dedicated M2M ingestion secret for machine-to-machine sync.
+ * Falls back to RADAR_SECURITY_KEY if RADAR_INGESTION_SECRET is not separately configured.
+ */
+export function getIngestionSecret(): string {
+  return getEnvValue('RADAR_INGESTION_SECRET') || getEnvValue('RADAR_SECURITY_KEY');
+}
+
+/**
  * Constant-time string comparison to prevent timing side-channel attacks.
  * Iterates through all characters with XOR comparison regardless of matching status.
  */

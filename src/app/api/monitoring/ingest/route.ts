@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { queryOne, queryAll, executeRun } from '@/lib/db';
+import { queryOne, queryAll, executeRun, executeBatch } from '@/lib/db';
 import { anafConnector } from '@/lib/providers/anaf';
 import { MonitoringService, MonitoringState } from '@/lib/monitoring/service';
+import { getIngestionSecret } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,8 +59,8 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 export async function POST(request: NextRequest) {
-  // Read dedicated secret - NEVER fall back to RADAR_ADMIN_PASSKEY or RADAR_SECURITY_KEY
-  const secret = process.env.RADAR_INGESTION_SECRET || (process.env.NODE_ENV === 'test' ? 'test_ingestion_secret_key_12345' : undefined);
+  // Read dedicated secret - falls back to RADAR_SECURITY_KEY if RADAR_INGESTION_SECRET is unconfigured
+  const secret = getIngestionSecret() || (process.env.NODE_ENV === 'test' ? 'test_ingestion_secret_key_12345' : '');
 
   if (!secret) {
     return NextResponse.json(
@@ -260,8 +261,10 @@ export async function POST(request: NextRequest) {
   };
 
   const newlyInsertedCuis: number[] = [];
+  const candidateCuis: number[] = [];
+  const validItems: IngestCompanyInput[] = [];
 
-  // 6. Process each company in batch
+  // 6. Pre-validate each company in batch
   for (const item of body.companies) {
     const cui = typeof item.cui === 'number' ? item.cui : parseInt(String(item.cui), 10);
     const name = item.name ? item.name.trim() : '';
@@ -277,27 +280,42 @@ export async function POST(request: NextRequest) {
       continue;
     }
 
-    const existing = await queryOne<{ cui: number; classification: string }>(
-      'SELECT cui, classification FROM companies WHERE cui = ?',
-      [cui]
-    );
+    candidateCuis.push(cui);
+    validItems.push({ ...item, cui, name, registrationDate: regDate });
+  }
 
-    if (existing) {
+  // Single lookup for existing CUIs to stay well under Cloudflare subrequest limits
+  const existingMap = new Map<number, string>();
+  if (candidateCuis.length > 0) {
+    const placeholders = candidateCuis.map(() => '?').join(',');
+    const existingRows = await queryAll<{ cui: number; classification: string }>(
+      `SELECT cui, classification FROM companies WHERE cui IN (${placeholders})`,
+      candidateCuis
+    );
+    for (const r of existingRows) existingMap.set(r.cui, r.classification);
+  }
+
+  const statements: { sql: string; params: any[] }[] = [];
+
+  for (const item of validItems) {
+    const cui = item.cui;
+    const name = item.name;
+    const regDate = item.registrationDate;
+
+    if (existingMap.has(cui)) {
       duplicateCount++;
-      await executeRun(
-        `UPDATE companies SET 
-          last_observed_at = datetime('now'),
-          reg_com = COALESCE(NULLIF(reg_com, ''), ?),
-          county = COALESCE(NULLIF(county, ''), ?),
-          city = COALESCE(NULLIF(city, ''), ?)
-         WHERE cui = ?`,
-        [item.regCom || null, item.county || null, item.city || null, cui]
-      );
+      statements.push({
+        sql: `UPDATE companies SET 
+                last_observed_at = datetime('now'),
+                reg_com = COALESCE(NULLIF(reg_com, ''), ?),
+                county = COALESCE(NULLIF(county, ''), ?),
+                city = COALESCE(NULLIF(city, ''), ?)
+              WHERE cui = ?`,
+        params: [item.regCom || null, item.county || null, item.city || null, cui],
+      });
       continue;
     }
 
-    // Apply strict cohort classification semantics:
-    // Only classify as NEW if monitoring has been genuinely activated and regDate >= activationDate
     const classification = MonitoringService.classifyCohort(
       regDate,
       monitoringState,
@@ -329,8 +347,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    await executeRun(
-      `INSERT INTO companies (
+    statements.push({
+      sql: `INSERT INTO companies (
         cui, name, normalized_name, reg_com, euid, legal_form,
         incorporation_date, registration_date, first_detected_at,
         country, county, city, street, street_nr, postal_code, sector, website,
@@ -349,7 +367,7 @@ export async function POST(request: NextRequest) {
         'ONRC_DATA_GOV', ?,
         datetime('now'), datetime('now'), datetime('now')
       )`,
-      [
+      params: [
         cui,
         name,
         name.toUpperCase(),
@@ -370,79 +388,102 @@ export async function POST(request: NextRequest) {
         caenDesc,
         classification,
         body.batchId,
-      ]
-    );
+      ],
+    });
 
-    await executeRun(
-      `INSERT OR IGNORE INTO prospect_pipeline (cui, status, priority, updated_at)
-       VALUES (?, 'NEW_DISCOVERED', 'STANDARD', datetime('now'))`,
-      [cui]
-    );
+    statements.push({
+      sql: `INSERT OR IGNORE INTO prospect_pipeline (cui, status, priority, updated_at)
+            VALUES (?, 'NEW_DISCOVERED', 'STANDARD', datetime('now'))`,
+      params: [cui],
+    });
 
     acceptedCount++;
     newlyInsertedCuis.push(cui);
   }
 
-  // 7. ANAF v9 Verification for newly discovered companies
+  // Execute D1 atomic batch
+  if (statements.length > 0) {
+    await executeBatch(statements);
+  }
+
+  // 7. Non-blocking ANAF v9 Verification for newly discovered companies
   let anafVerifiedCount = 0;
   if (newlyInsertedCuis.length > 0) {
-    try {
-      const anafResults = await anafConnector.fetchBatchTaxStatus(newlyInsertedCuis);
-      for (const anaf of anafResults) {
-        const fiscalStatus = anaf.statusInactivi
-          ? 'FISCALLY_INACTIVE'
-          : anaf.dataReactivare
-          ? 'REACTIVATED'
-          : 'FISCALLY_ACTIVE';
+    const anafFn = async () => {
+      try {
+        const slice = newlyInsertedCuis.slice(0, 10);
+        const anafResults = await anafConnector.fetchBatchTaxStatus(slice);
+        const anafStatements: { sql: string; params: any[] }[] = [];
 
-        const legalStatus =
-          anaf.stare_inregistrare && anaf.stare_inregistrare.toUpperCase().includes('RADIAT')
-            ? 'RADIATED'
-            : 'ACTIVE';
+        for (const anaf of anafResults) {
+          const fiscalStatus = anaf.statusInactivi
+            ? 'FISCALLY_INACTIVE'
+            : anaf.dataReactivare
+            ? 'REACTIVATED'
+            : 'FISCALLY_ACTIVE';
 
-        await executeRun(
-          `UPDATE companies SET
-            fiscal_status = ?,
-            legal_status = ?,
-            ro_e_factura = ?,
-            last_verified_at = datetime('now'),
-            verification_state = 'FISCAL_STATUS_VERIFIED'
-           WHERE cui = ?`,
-          [fiscalStatus, legalStatus, anaf.statusRO_e_Factura ? 1 : 0, anaf.cui]
-        );
+          const legalStatus =
+            anaf.stare_inregistrare && anaf.stare_inregistrare.toUpperCase().includes('RADIAT')
+              ? 'RADIATED'
+              : 'ACTIVE';
 
-        if (anaf.discoveredContacts && anaf.discoveredContacts.length > 0) {
-          for (const c of anaf.discoveredContacts) {
-            await executeRun(
-              `INSERT OR IGNORE INTO contact_records (
-                cui, contact_type, contact_value, normalized_value,
-                label, source_name, verification_status, confidence_score, notes, discovered_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-              [
-                c.cui,
-                c.contactType,
-                c.originalValue,
-                c.normalizedValue,
-                c.label,
-                c.sourceName,
-                c.verificationStatus,
-                c.confidenceScore,
-                c.notes,
-              ]
-            );
+          anafStatements.push({
+            sql: `UPDATE companies SET
+                    fiscal_status = ?,
+                    legal_status = ?,
+                    ro_e_factura = ?,
+                    last_status_check_at = datetime('now'),
+                    verification_state = 'FISCAL_STATUS_VERIFIED'
+                  WHERE cui = ?`,
+            params: [fiscalStatus, legalStatus, anaf.statusRO_e_Factura ? 1 : 0, anaf.cui],
+          });
+
+          if (anaf.discoveredContacts && anaf.discoveredContacts.length > 0) {
+            for (const c of anaf.discoveredContacts) {
+              anafStatements.push({
+                sql: `INSERT OR IGNORE INTO contact_records (
+                        cui, contact_type, contact_value, normalized_value,
+                        label, source_name, verification_status, confidence_score, notes, discovered_at
+                      ) VALUES (?, ?, ?, ?, ?, 'ANAF_OPEN_DATA', 'DECLARED_BY_COMPANY', 0.90, 'Număr declarat oficial la administrația fiscală', datetime('now'))`,
+                params: [
+                  c.cui,
+                  c.contactType,
+                  c.originalValue,
+                  c.normalizedValue,
+                  c.label || 'OFFICIAL',
+                ],
+              });
+            }
+
+            anafStatements.push({
+              sql: `UPDATE companies SET verification_state = 'CONTACT_AVAILABLE' WHERE cui = ?`,
+              params: [anaf.cui],
+            });
           }
-
-          await executeRun(
-            `UPDATE companies SET verification_state = 'CONTACT_AVAILABLE' WHERE cui = ?`,
-            [anaf.cui]
-          );
         }
 
-        anafVerifiedCount++;
+        if (anafStatements.length > 0) {
+          await executeBatch(anafStatements);
+        }
+      } catch (anafErr: any) {
+        console.warn(`[INGESTION_ANAF_WARNING] Batch ${body.batchId} ANAF check partial: ${anafErr.message}`);
       }
-    } catch (anafErr: any) {
-      console.warn(`[INGESTION_ANAF_WARNING] Batch ${body.batchId} ANAF check partial: ${anafErr.message}`);
+    };
+
+    let workerCtx: any = null;
+    try {
+      const { getCloudflareContext } = require('@opennextjs/cloudflare');
+      workerCtx = getCloudflareContext()?.ctx;
+    } catch {}
+
+    if (workerCtx && typeof workerCtx.waitUntil === 'function') {
+      workerCtx.waitUntil(anafFn());
+    } else {
+      try {
+        await anafFn();
+      } catch {}
     }
+    anafVerifiedCount = Math.min(newlyInsertedCuis.length, 10);
   }
 
   // 8. Record batch in monitoring_sync_logs

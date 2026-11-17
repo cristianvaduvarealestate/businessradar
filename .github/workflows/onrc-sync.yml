@@ -63,7 +63,7 @@ jobs:
       - name: Execute ONRC Discovery Ingestion
         env:
           RADAR_INGESTION_URL: ${{ vars.RADAR_INGESTION_URL || 'https://businessradar.cristianvaduva.com/api/monitoring/ingest' }}
-          RADAR_INGESTION_SECRET: ${{ secrets.RADAR_INGESTION_SECRET }}
+          RADAR_INGESTION_SECRET: ${{ secrets.RADAR_INGESTION_SECRET || secrets.RADAR_SECURITY_KEY }}
         run: |
           FLAGS="--mode api"
           if [ "${{ inputs.dry_run }}" = "true" ] || [ -z "$RADAR_INGESTION_SECRET" ]; then

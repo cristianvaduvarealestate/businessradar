@@ -18,6 +18,18 @@ const http = require('http');
 const readline = require('readline');
 const crypto = require('crypto');
 
+// Automatically load .env.local if present
+const envLocalPath = path.join(__dirname, '..', '.env.local');
+if (fs.existsSync(envLocalPath)) {
+  const envContent = fs.readFileSync(envLocalPath, 'utf8');
+  for (const line of envContent.split('\n')) {
+    const match = line.match(/^([A-Za-z0-9_]+)=(.*)$/);
+    if (match && !process.env[match[1]]) {
+      process.env[match[1]] = match[2].trim();
+    }
+  }
+}
+
 // Parse CLI arguments
 const args = process.argv.slice(2);
 function getArg(flag, defaultValue = null) {
@@ -29,7 +41,7 @@ const hasFlag = (flag) => args.includes(flag);
 
 const MODE = getArg('--mode', process.env.RADAR_INGESTION_URL ? 'api' : 'direct');
 const API_URL = getArg('--api', process.env.RADAR_INGESTION_URL || 'https://businessradar.cristianvaduva.com/api/monitoring/ingest');
-const TOKEN = getArg('--token', process.env.RADAR_INGESTION_SECRET || '');
+const TOKEN = getArg('--token', process.env.RADAR_INGESTION_SECRET || process.env.RADAR_SECURITY_KEY || '');
 const DB_PATH = getArg('--db', path.join(__dirname, '..', 'data', 'radar_business.db'));
 const LIMIT = parseInt(getArg('--limit', '0'), 10); // 0 = unlimited
 const BATCH_SIZE = Math.min(200, Math.max(10, parseInt(getArg('--batch-size', '50'), 10)));
@@ -512,6 +524,11 @@ async function main() {
         isNew = true;
       } else if (isoDate >= baselineCutoff) {
         isBackfill = true;
+      }
+
+      // Skip older historical companies (pre-cutoff) to prevent reprocessing 4.2M historical records
+      if (!isNew && !isBackfill) {
+        continue;
       }
 
       if (localKnownCuis.has(cui)) {
