@@ -44,3 +44,11 @@ yarn-error.log*
 # OS Files
 .DS_Store
 *.pem
+
+# Build and runtime state
+tsconfig.tsbuildinfo
+data/.onrc_sync_checkpoint.json
+data/business_radar_import_surse.zip
+data/sources_import/
+data/seed_prospects_d1.sql
+

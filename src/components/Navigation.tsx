@@ -16,12 +16,30 @@ import {
   ShieldAlert,
   Sparkles,
   PhoneCall,
+  Briefcase,
+  Hotel,
 } from 'lucide-react';
 
-const NAV_ITEMS = [
+interface NavItem {
+  href: string;
+  label: string;
+  icon: any;
+  badge?: string;
+  highlight?: boolean;
+}
+
+const REGISTRY_ITEMS: NavItem[] = [
   { href: '/companies', label: 'Firme existente', icon: Building2, badge: '128' },
   { href: '/new-companies', label: 'Firme noi', icon: Sparkles, badge: 'Radar', highlight: true },
   { href: '/pipeline', label: 'Activități', icon: TrendingUp },
+];
+
+const PROSPECTING_ITEMS: NavItem[] = [
+  { href: '/prospecting/general', label: 'Prospectare generală', icon: Briefcase, badge: '304' },
+  { href: '/prospecting/niche', label: 'Hoteluri, pensiuni, auto', icon: Hotel, badge: '25' },
+];
+
+const CONFIG_ITEMS: NavItem[] = [
   { href: '/settings', label: 'Configurare', icon: Settings },
 ];
 
@@ -67,11 +85,11 @@ export default function Navigation() {
 
       {/* Main Nav Links */}
       <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-        <div className="px-3 py-2 text-[10px] font-bold text-titanium-500 uppercase tracking-wider">
-          Workspace Unificat
+        <div className="px-3 py-1.5 text-[10px] font-bold text-titanium-500 uppercase tracking-wider">
+          Registru Național
         </div>
 
-        {NAV_ITEMS.map((item) => {
+        {REGISTRY_ITEMS.map((item) => {
           const Icon = item.icon;
           const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
 
@@ -79,7 +97,69 @@ export default function Navigation() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center justify-between px-3 py-2.5 rounded-md text-xs font-medium transition-all ${
+              className={`flex items-center justify-between px-3 py-2 rounded-md text-xs font-medium transition-all ${
+                isActive
+                  ? 'bg-titanium-800 text-radar-green border border-titanium-700 shadow-sm'
+                  : 'text-titanium-300 hover:text-titanium-100 hover:bg-titanium-850'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <Icon className={`w-4 h-4 ${isActive ? 'text-radar-green' : 'text-titanium-400'}`} />
+                <span>{item.label}</span>
+              </div>
+              {item.badge && (
+                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-radar-emerald/20 text-radar-green border border-radar-emerald/30">
+                  {item.badge}
+                </span>
+              )}
+            </Link>
+          );
+        })}
+
+        <div className="pt-3 px-3 py-1.5 text-[10px] font-bold text-titanium-500 uppercase tracking-wider">
+          Portofolii Prospectare & CRM
+        </div>
+
+        {PROSPECTING_ITEMS.map((item) => {
+          const Icon = item.icon;
+          const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex items-center justify-between px-3 py-2 rounded-md text-xs font-medium transition-all ${
+                isActive
+                  ? 'bg-titanium-800 text-radar-green border border-titanium-700 shadow-sm'
+                  : 'text-titanium-300 hover:text-titanium-100 hover:bg-titanium-850'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <Icon className={`w-4 h-4 ${isActive ? 'text-radar-green' : 'text-titanium-400'}`} />
+                <span>{item.label}</span>
+              </div>
+              {item.badge && (
+                <span className="px-1.5 py-0.5 text-[9px] font-bold rounded bg-radar-emerald/20 text-radar-green border border-radar-emerald/30">
+                  {item.badge}
+                </span>
+              )}
+            </Link>
+          );
+        })}
+
+        <div className="pt-3 px-3 py-1.5 text-[10px] font-bold text-titanium-500 uppercase tracking-wider">
+          Sistem
+        </div>
+
+        {CONFIG_ITEMS.map((item) => {
+          const Icon = item.icon;
+          const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`flex items-center justify-between px-3 py-2 rounded-md text-xs font-medium transition-all ${
                 isActive
                   ? 'bg-titanium-800 text-radar-green border border-titanium-700 shadow-sm'
                   : 'text-titanium-300 hover:text-titanium-100 hover:bg-titanium-850'
