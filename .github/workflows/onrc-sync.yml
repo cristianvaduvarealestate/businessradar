@@ -40,7 +40,7 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 120
     # Strict security guard: only execute on upstream repo and main branch
-    if: github.repository == 'cristianvaduvarealestate/businessradar' && (github.ref == 'refs/heads/main' || github.ref == '')
+    if: github.repository == 'cristianvaduvarealestate/businessradar' && github.ref == 'refs/heads/main'
 
     steps:
       - name: Checkout Repository

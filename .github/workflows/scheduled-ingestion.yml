@@ -8,9 +8,13 @@ on:
     - cron: '0 6 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   ingest-and-monitor:
     runs-on: ubuntu-latest
+    if: github.repository == 'cristianvaduvarealestate/businessradar' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
