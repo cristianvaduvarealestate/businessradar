@@ -264,22 +264,6 @@ async function main() {
     }
   }
 
-  // Load local checkpoint if available
-  if (fs.existsSync(CHECKPOINT_FILE)) {
-    try {
-      const cp = JSON.parse(fs.readFileSync(CHECKPOINT_FILE, 'utf-8'));
-      if (cp.cursorLine && cp.cursorLine > startCursor) {
-        startCursor = cp.cursorLine;
-        console.log(`[CHECKPOINT] Resuming from saved checkpoint at line ${startCursor}`);
-      }
-    } catch (e) {}
-  }
-
-  console.log(`Current Monitoring State: ${monitoringState}`);
-  console.log(`Continuous Activation Date: ${activationDate || 'NOT_YET_ACTIVATED (Pending first complete sync)'}`);
-  console.log(`Baseline Backfill Cutoff: ${baselineCutoff}`);
-  console.log(`Starting Stream Cursor: Line ${startCursor}`);
-
   // 1. Check CKAN Metadata with Retries
   let packageInfo = null;
   let datasetUrl = DEFAULT_CSV_FALLBACK;
@@ -317,6 +301,25 @@ async function main() {
       console.warn(`Could not fetch CKAN API metadata after 4 retries (${err.message}). Using fallback resource URL.`);
     }
 
+    // Load and validate local checkpoint against active dataset version
+    if (fs.existsSync(CHECKPOINT_FILE)) {
+      try {
+        const cp = JSON.parse(fs.readFileSync(CHECKPOINT_FILE, 'utf-8'));
+        if (cp.datasetModified && datasetModified && cp.datasetModified !== datasetModified) {
+          console.warn(`[CHECKPOINT STALE] Saved checkpoint was for dataset modified at ${cp.datasetModified}, but active dataset is ${datasetModified}. Resetting stale checkpoint.`);
+          try { fs.unlinkSync(CHECKPOINT_FILE); } catch (e) {}
+        } else if (cp.cursorLine && cp.cursorLine > startCursor) {
+          startCursor = cp.cursorLine;
+          console.log(`[CHECKPOINT] Resuming from verified checkpoint at line ${startCursor} (dataset modified: ${cp.datasetModified || 'matched'})`);
+        }
+      } catch (e) {}
+    }
+
+    console.log(`Current Monitoring State: ${monitoringState}`);
+    console.log(`Continuous Activation Date: ${activationDate || 'NOT_YET_ACTIVATED (Pending first complete sync)'}`);
+    console.log(`Baseline Backfill Cutoff: ${baselineCutoff}`);
+    console.log(`Starting Stream Cursor: Line ${startCursor}`);
+
     // 2. Check if dataset is unchanged and previously completed
     if (!FORCE && datasetModified && lastRecordedModified === datasetModified && monitoringState === 'CONTINUOUS_DISCOVERY' && startCursor > 100000) {
       console.log(`[INFO] Dataset ${packageId} has not changed since ${datasetModified} and was completed.`);
@@ -327,6 +330,19 @@ async function main() {
     console.log(`Using local file: ${LOCAL_FILE}`);
     datasetTitle = `Local Slice: ${path.basename(LOCAL_FILE)}`;
     expectedSize = fs.statSync(LOCAL_FILE).size;
+
+    if (fs.existsSync(CHECKPOINT_FILE)) {
+      try {
+        const cp = JSON.parse(fs.readFileSync(CHECKPOINT_FILE, 'utf-8'));
+        if (cp.cursorLine && cp.cursorLine > startCursor) {
+          startCursor = cp.cursorLine;
+          console.log(`[CHECKPOINT] Resuming local file slice from line ${startCursor}`);
+        }
+      } catch (e) {}
+    }
+
+    console.log(`Current Monitoring State: ${monitoringState}`);
+    console.log(`Starting Stream Cursor: Line ${startCursor}`);
   }
 
   // 3. Establish Streaming Input Connection
@@ -351,11 +367,13 @@ async function main() {
   let batchIndex = 0;
   let batchBuffer = [];
   let lineCount = 0;
+  let lastCommittedLine = startCursor;
   let validCuiCount = 0;
   let rejectedCount = 0;
   let discoveredNewCount = 0;
   let discoveredBackfillCount = 0;
   let duplicatesSkippedCount = 0;
+  let limitReached = false;
   let eofReached = false;
 
   console.log(`Starting streaming line-by-line caret parser (batch size: ${BATCH_SIZE})...`);
@@ -374,7 +392,8 @@ async function main() {
   });
 
   const sendBatch = async (isFinal = false) => {
-    if (batchBuffer.length === 0 && !isFinal) return;
+    // Suppress empty trailing batches unless this is an authentic complete signal at real physical EOF
+    if (batchBuffer.length === 0 && (!isFinal || !eofReached || limitReached)) return;
     batchIndex++;
     const batchId = `batch_${syncId}_${batchIndex}`;
     const payload = {
@@ -386,12 +405,13 @@ async function main() {
       batchId,
       cursorStart: Math.max(0, lineCount - batchBuffer.length),
       cursorEnd: lineCount,
-      isComplete: isFinal && eofReached,
+      isComplete: isFinal && eofReached && !limitReached,
       companies: batchBuffer,
     };
 
     if (DRY_RUN) {
       console.log(`[DRY-RUN] Assembled batch ${batchId} with ${batchBuffer.length} companies (isComplete: ${payload.isComplete}).`);
+      lastCommittedLine = lineCount;
       batchBuffer = [];
       return;
     }
@@ -402,10 +422,37 @@ async function main() {
         console.log(
           `[BATCH ${batchIndex}] Posted ${batchBuffer.length} companies -> Accepted: ${resp.accepted}, Duplicates: ${resp.duplicates}, ANAF Verified: ${resp.anafVerified}`
         );
+        lastCommittedLine = lineCount;
+        // Save checkpoint ONLY on successful commit
+        try {
+          fs.writeFileSync(CHECKPOINT_FILE, JSON.stringify({
+            cursorLine: lastCommittedLine,
+            datasetModified,
+            resourceId,
+            packageId,
+            syncId,
+            batchIndex,
+            timestamp: new Date().toISOString()
+          }));
+        } catch (e) {}
       } catch (err) {
         console.error(`[BATCH ERROR] Failed to send batch ${batchId}: ${err.message}`);
-        // Save checkpoint on error
-        fs.writeFileSync(CHECKPOINT_FILE, JSON.stringify({ cursorLine: lineCount, syncId, batchIndex, timestamp: new Date().toISOString() }));
+        // CRITICAL: On error, checkpoint must NOT advance past lastCommittedLine!
+        // Preserves lastCommittedLine so resumption retries this exact uncommitted batch.
+        try {
+          fs.writeFileSync(CHECKPOINT_FILE, JSON.stringify({
+            cursorLine: lastCommittedLine,
+            failedAtLine: lineCount,
+            failedBatchId: batchId,
+            datasetModified,
+            resourceId,
+            packageId,
+            syncId,
+            batchIndex,
+            timestamp: new Date().toISOString(),
+            error: err.message
+          }));
+        } catch (e) {}
         throw err;
       }
     } else if (MODE === 'direct' && db) {
@@ -458,13 +505,22 @@ async function main() {
       });
 
       tx(batchBuffer);
+      lastCommittedLine = lineCount;
       console.log(`[DIRECT BATCH ${batchIndex}] Persisted ${batchBuffer.length} companies into local SQLite.`);
-    }
 
-    // Save checkpoint
-    try {
-      fs.writeFileSync(CHECKPOINT_FILE, JSON.stringify({ cursorLine: lineCount, syncId, batchIndex, timestamp: new Date().toISOString() }));
-    } catch (e) {}
+      // Save checkpoint on successful transaction
+      try {
+        fs.writeFileSync(CHECKPOINT_FILE, JSON.stringify({
+          cursorLine: lastCommittedLine,
+          datasetModified,
+          resourceId,
+          packageId,
+          syncId,
+          batchIndex,
+          timestamp: new Date().toISOString()
+        }));
+      } catch (e) {}
+    }
 
     batchBuffer = [];
   };
@@ -583,6 +639,7 @@ async function main() {
 
       if (LIMIT > 0 && (discoveredNewCount + discoveredBackfillCount) >= LIMIT) {
         console.log(`Target limit of ${LIMIT} companies reached. Halting stream gracefully.`);
+        limitReached = true;
         rl.close();
         if (inputStream.destroy) inputStream.destroy();
         break;
@@ -593,18 +650,22 @@ async function main() {
       }
     }
 
-    // Stream finished naturally without errors: mark EOF
-    if (LIMIT === 0 || (LIMIT > 0 && (discoveredNewCount + discoveredBackfillCount) >= LIMIT)) {
+    // EOF is reached ONLY if limit was NOT hit
+    if (!limitReached) {
       eofReached = true;
     }
 
     // Send final remaining buffer
-    if (batchBuffer.length > 0 || eofReached) {
+    if (batchBuffer.length > 0) {
+      // If EOF reached without limit, this is the final completing batch
+      await sendBatch(eofReached);
+    } else if (eofReached && !limitReached) {
+      // Buffer is empty, but genuine physical EOF reached: send final EOF signal
       await sendBatch(true);
     }
 
-    // If whole file completed in direct mode, record first complete activation
-    if (eofReached && MODE === 'direct' && db) {
+    // If whole file completed in direct mode, record first complete activation ONLY on true physical EOF
+    if (eofReached && !limitReached && MODE === 'direct' && db) {
       const nowIso = new Date().toISOString();
       if (monitoringState !== 'CONTINUOUS_DISCOVERY') {
         db.prepare("INSERT OR REPLACE INTO monitoring_config (key, value, updated_at) VALUES ('monitoring_state', 'CONTINUOUS_DISCOVERY', datetime('now'))").run();
@@ -616,6 +677,9 @@ async function main() {
       db.prepare("INSERT OR REPLACE INTO monitoring_config (key, value, updated_at) VALUES ('stream_cursor_line', ?, datetime('now'))").run(String(lineCount));
       // Remove checkpoint on clean completion
       try { fs.unlinkSync(CHECKPOINT_FILE); } catch (e) {}
+    } else if (limitReached && MODE === 'direct' && db) {
+      db.prepare("INSERT OR REPLACE INTO monitoring_config (key, value, updated_at) VALUES ('last_sync_status', 'PARTIAL_LIMIT_REACHED', datetime('now'))").run();
+      console.log(`[PARTIAL LIMIT] Reached limit of ${LIMIT}. Monitoring state remains ${monitoringState}.`);
     }
 
     const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -627,7 +691,8 @@ async function main() {
     console.log(`Initial Backfill: ${discoveredBackfillCount}`);
     console.log(`Duplicates / Already Known: ${duplicatesSkippedCount}`);
     console.log(`Rejected Rows: ${rejectedCount}`);
-    console.log(`EOF Complete: ${eofReached}`);
+    console.log(`Physical EOF Complete: ${eofReached && !limitReached}`);
+    console.log(`Bounded Limit Reached: ${limitReached}`);
     console.log('='.repeat(70));
   } catch (err) {
     console.error(`[STREAM RUNTIME ERROR] ${err.message}`);
@@ -641,7 +706,16 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(`Fatal error: ${err.message}`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(`Fatal error: ${err.message}`);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  fetchJsonWithRetry,
+  openStreamWithRetry,
+  postJson,
+  main,
+};
