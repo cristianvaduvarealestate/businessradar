@@ -158,6 +158,77 @@ export class MonitoringService {
   }
 
   /**
+   * Check official data.gov.ro CKAN API for new ONRC dataset publications.
+   * Free, official, public government API.
+   */
+  static async checkForNewOnrcReleases(): Promise<{
+    hasNewRelease: boolean;
+    packageId?: string;
+    title?: string;
+    modified?: string;
+    downloadUrl?: string;
+    size?: number;
+  }> {
+    try {
+      const ckanUrl = 'https://data.gov.ro/api/3/action/package_search?q=ONRC&sort=metadata_modified+desc&rows=3';
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+      const res = await fetch(ckanUrl, {
+        headers: {
+          'User-Agent': 'RadarBusinessRomania/2.0 (Official CKAN Source Monitor)',
+          'Accept': 'application/json',
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) return { hasNewRelease: false };
+      const json: any = await res.json();
+      if (!json.success || !Array.isArray(json.result?.results)) return { hasNewRelease: false };
+
+      // Find the main company dataset ("Firme înregistrate la Registrul Comerțului...")
+      const pkg = json.result.results.find((p: any) =>
+        (p.title || '').includes('Firme înregistrate') || (p.name || '').includes('firme')
+      );
+      if (!pkg) return { hasNewRelease: false };
+
+      const config = await this.getConfig();
+      const currentPkgId = config.active_package_id || '';
+      const currentModified = config.active_package_modified || '';
+
+      const isNew = pkg.id !== currentPkgId || (pkg.metadata_modified && pkg.metadata_modified > currentModified);
+
+      // Find the OD_FIRME.CSV resource
+      const resource = (pkg.resources || []).find((r: any) =>
+        (r.name || '').toUpperCase().includes('OD_FIRME') || (r.url || '').toLowerCase().includes('od_firme.csv')
+      );
+
+      if (isNew) {
+        await this.updateConfigKey('active_package_id', pkg.id);
+        await this.updateConfigKey('active_package_title', pkg.title || 'ONRC Open Data');
+        await this.updateConfigKey('active_package_modified', pkg.metadata_modified || '');
+        if (resource) {
+          if (resource.url) await this.updateConfigKey('active_source_url', resource.url);
+          if (resource.size) await this.updateConfigKey('active_package_expected_size', String(resource.size));
+        }
+      }
+
+      return {
+        hasNewRelease: isNew,
+        packageId: pkg.id,
+        title: pkg.title,
+        modified: pkg.metadata_modified,
+        downloadUrl: resource?.url,
+        size: resource?.size,
+      };
+    } catch (e: any) {
+      console.warn('[MonitoringService] Official CKAN source check error:', e.message);
+      return { hasNewRelease: false };
+    }
+  }
+
+  /**
    * Retrieve recent sync logs
    */
   static async getSyncLogs(limit: number = 20): Promise<MonitoringSyncLog[]> {
@@ -360,6 +431,11 @@ export class MonitoringService {
         error: 'CONCURRENT_SYNC_LOCKED',
       };
     }
+
+    // Check official CKAN release for updates
+    try {
+      await this.checkForNewOnrcReleases();
+    } catch {}
 
     // Acquire lock
     await this.updateConfigKey('sync_lock', String(Date.now()));

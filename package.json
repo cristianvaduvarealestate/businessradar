@@ -6,9 +6,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:worker": "opennextjs-cloudflare build",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "deploy:worker": "opennextjs-cloudflare deploy",
+    "build:worker": "opennextjs-cloudflare build && node scripts/patch-worker-scheduled.js",
+    "preview": "opennextjs-cloudflare build && node scripts/patch-worker-scheduled.js && opennextjs-cloudflare preview",
+    "deploy:worker": "node scripts/patch-worker-scheduled.js && opennextjs-cloudflare deploy",
     "start": "next start",
     "lint": "next lint",
     "db:init": "node scripts/init-db.js",
