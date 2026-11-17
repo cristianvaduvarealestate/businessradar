@@ -27,6 +27,9 @@ on:
         type: number
         default: 0
 
+permissions:
+  contents: read
+
 concurrency:
   group: onrc-sync-executor
   cancel-in-progress: false
@@ -34,8 +37,10 @@ concurrency:
 jobs:
   onrc-discovery-sync:
     name: ONRC Dataset Discovery & Ingestion
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, macOS, ARM64]
     timeout-minutes: 120
+    # Strict security guard: only execute on upstream repo and main branch
+    if: github.repository == 'cristianvaduvarealestate/businessradar' && (github.ref == 'refs/heads/main' || github.ref == '')
 
     steps:
       - name: Checkout Repository
