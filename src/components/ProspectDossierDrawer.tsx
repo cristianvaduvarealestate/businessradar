@@ -121,6 +121,31 @@ export default function ProspectDossierDrawer({
     }
   }, [prospectId, isOpen]);
 
+  // Handle Escape key to close drawer
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose();
+      }
+    };
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  // Lock background scroll when drawer is open
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleStatusChange = async (newStatus: CommercialStatusKey) => {
@@ -230,11 +255,19 @@ export default function ProspectDossierDrawer({
   const currentStatusDef = prospect ? COMMERCIAL_STATUSES[prospect.commercial_status] : null;
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-black/70 backdrop-blur-sm flex justify-end">
-      <div className="w-full max-w-2xl bg-titanium-900 border-l border-titanium-800 shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-200">
+    <div
+      className="fixed inset-0 z-50 overflow-hidden bg-black/75 backdrop-blur-sm flex justify-end"
+      onClick={onClose}
+      aria-modal="true"
+      role="dialog"
+    >
+      <div
+        className="w-full max-w-full sm:max-w-2xl bg-titanium-900 border-l border-titanium-800 shadow-2xl flex flex-col h-full animate-in slide-in-from-right duration-200"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Drawer Header */}
-        <div className="p-5 border-b border-titanium-800 bg-titanium-950 flex items-start justify-between">
-          <div className="flex-1 pr-4">
+        <div className="p-4 sm:p-5 border-b border-titanium-800 bg-titanium-950 flex items-start justify-between shrink-0">
+          <div className="flex-1 pr-3 min-w-0">
             <div className="flex items-center gap-2 mb-1.5 flex-wrap">
               <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-titanium-800 text-titanium-300 border border-titanium-700">
                 {prospect?.portfolio_type === 'GENERAL' ? 'Prospectare Generală' : 'HORECA / Auto / Construct'}
@@ -248,14 +281,14 @@ export default function ProspectDossierDrawer({
               {prospect?.matched_cui && (
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/60">
                   <ShieldCheck className="w-3 h-3 text-radar-green" />
-                  Firmă verificată în registru (CUI {prospect.matched_cui})
+                  CUI {prospect.matched_cui} verificat
                 </span>
               )}
             </div>
-            <h2 className="text-lg font-bold text-titanium-100 leading-tight">
+            <h2 className="text-base sm:text-lg font-bold text-titanium-100 leading-tight truncate">
               {prospect?.company_name || 'Se încarcă dosarul...'}
             </h2>
-            <div className="text-xs text-titanium-400 mt-0.5 flex items-center gap-2">
+            <div className="text-xs text-titanium-400 mt-0.5 flex items-center gap-2 flex-wrap">
               <span>{prospect?.domain || 'Domeniu nespecificat'}</span>
               {(prospect?.city || prospect?.county) && (
                 <>
@@ -272,8 +305,10 @@ export default function ProspectDossierDrawer({
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-titanium-400 hover:text-white hover:bg-titanium-800 transition"
+            className="p-2 -mr-1 rounded-lg text-titanium-400 hover:text-white hover:bg-titanium-800 transition min-w-[40px] min-h-[40px] flex items-center justify-center shrink-0"
+            aria-label="Închide dosarul"
           >
             <X className="w-5 h-5" />
           </button>
@@ -291,7 +326,7 @@ export default function ProspectDossierDrawer({
             {error}
           </div>
         ) : prospect ? (
-          <div className="flex-1 overflow-y-auto p-5 space-y-6">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5 sm:space-y-6 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
             {/* 1. Commercial Status Selector */}
             <div className="p-4 rounded-xl bg-titanium-850 border border-titanium-800">
               <div className="text-xs font-semibold text-titanium-300 uppercase tracking-wider mb-2 flex items-center justify-between">
@@ -531,7 +566,7 @@ export default function ProspectDossierDrawer({
                   type="button"
                   onClick={handleSaveFields}
                   disabled={savingFields}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-titanium-800 hover:bg-titanium-750 border border-titanium-700 text-titanium-100 rounded-lg text-xs font-medium transition"
+                  className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 min-h-[40px] bg-titanium-800 hover:bg-titanium-750 border border-titanium-700 text-titanium-100 rounded-lg text-xs font-semibold transition"
                 >
                   {savingFields ? (
                     <>
@@ -693,18 +728,18 @@ export default function ProspectDossierDrawer({
                     </div>
                   </div>
 
-                  <div className="flex justify-end gap-2 pt-2 border-t border-titanium-800">
+                  <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-2 border-t border-titanium-800">
                     <button
                       type="button"
                       onClick={() => setIsAddingDiscussion(false)}
-                      className="px-3 py-1.5 text-xs text-titanium-400 hover:text-white"
+                      className="w-full sm:w-auto px-4 py-2 min-h-[40px] text-xs text-titanium-400 hover:text-white rounded-lg hover:bg-titanium-800 transition"
                     >
                       Anulează
                     </button>
                     <button
                       type="submit"
                       disabled={submittingDiscussion}
-                      className="px-4 py-1.5 bg-radar-green text-titanium-950 rounded-lg text-xs font-semibold hover:bg-radar-emerald transition flex items-center gap-1.5"
+                      className="w-full sm:w-auto px-4 py-2 min-h-[40px] bg-radar-green text-titanium-950 rounded-lg text-xs font-semibold hover:bg-radar-emerald transition flex items-center justify-center gap-1.5"
                     >
                       {submittingDiscussion ? (
                         <>
