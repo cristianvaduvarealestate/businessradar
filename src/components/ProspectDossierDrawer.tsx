@@ -270,7 +270,11 @@ export default function ProspectDossierDrawer({
           <div className="flex-1 pr-3 min-w-0">
             <div className="flex items-center gap-2 mb-1.5 flex-wrap">
               <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-titanium-800 text-titanium-300 border border-titanium-700">
-                {prospect?.portfolio_type === 'GENERAL' ? 'Prospectare Generală' : 'HORECA / Auto / Construct'}
+                {prospect?.portfolio_type === 'TOURISM_UNITS'
+                  ? 'Unitate Turistică Clasificată'
+                  : prospect?.portfolio_type === 'GENERAL'
+                  ? 'Prospectare Generală'
+                  : 'HORECA / Auto / Construct'}
               </span>
               {prospect?.is_incomplete === 1 && (
                 <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/60">
@@ -369,6 +373,52 @@ export default function ProspectDossierDrawer({
                 </select>
               </div>
             </div>
+
+            {/* 1.5. Tourism Unit & Operator Details (if Tourism Unit) */}
+            {(prospect.portfolio_type === 'TOURISM_UNITS' || prospect.unit_type || prospect.operator_name) && (
+              <div className="p-4 rounded-xl bg-titanium-850 border border-titanium-800 space-y-3">
+                <div className="text-xs font-semibold text-titanium-300 uppercase tracking-wider flex items-center justify-between">
+                  <span>Detalii Unitate Turistică & Operator</span>
+                  {prospect.unit_classification && (
+                    <span className="text-[11px] font-bold text-radar-green bg-titanium-900 border border-titanium-700 px-2 py-0.5 rounded">
+                      {prospect.unit_classification}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <span className="text-[11px] text-titanium-400 block">Tip Unitate:</span>
+                    <span className="font-semibold text-titanium-100">{prospect.unit_type || '—'}</span>
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-titanium-400 block">Capacitate Clasificată:</span>
+                    <span className="text-titanium-200">
+                      {prospect.rooms_count ? `${prospect.rooms_count} spații` : '—'} • {prospect.beds_count ? `${prospect.beds_count} locuri` : '—'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-titanium-400 block">Operator Economic:</span>
+                    <span className="font-semibold text-titanium-100">{prospect.operator_name || '—'}</span>
+                    {prospect.operator_type && (
+                      <span className="text-[10px] text-titanium-400 block">({prospect.operator_type})</span>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-[11px] text-titanium-400 block">Cod Fiscal / Reg. Com:</span>
+                    <span className="font-mono text-titanium-200">
+                      CUI: {prospect.cui || '—'} {prospect.reg_com ? `• ${prospect.reg_com}` : ''}
+                    </span>
+                  </div>
+                  {prospect.authorization_number && (
+                    <div className="sm:col-span-2 pt-1 border-t border-titanium-800/60 text-[11px] text-titanium-400">
+                      Autorizație Ministerul Turismului: <strong className="text-titanium-200">{prospect.authorization_number}</strong>
+                      {prospect.authorization_date ? ` emisă la ${prospect.authorization_date}` : ''}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* 2. Contact Details & Identification */}
             <div className="p-4 rounded-xl bg-titanium-850 border border-titanium-800 space-y-3">

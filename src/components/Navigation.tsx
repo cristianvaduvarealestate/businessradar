@@ -19,6 +19,7 @@ import {
   PhoneCall,
   Briefcase,
   Hotel,
+  Palmtree,
   Menu,
   X,
 } from 'lucide-react';
@@ -40,6 +41,7 @@ const REGISTRY_ITEMS: NavItem[] = [
 const PROSPECTING_ITEMS: NavItem[] = [
   { href: '/prospecting/general', label: 'Prospectare generală', icon: Briefcase, badge: '304' },
   { href: '/prospecting/niche', label: 'Hoteluri, pensiuni, auto', icon: Hotel, badge: '25' },
+  { href: '/prospecting/tourism', label: 'Unități Turistice', icon: Palmtree, badge: '30.8k' },
 ];
 
 const CONFIG_ITEMS: NavItem[] = [

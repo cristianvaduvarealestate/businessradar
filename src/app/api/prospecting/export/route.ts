@@ -22,7 +22,14 @@ export async function GET(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const portfolio = (searchParams.get('portfolio') as PortfolioType) || 'GENERAL';
+    let portfolio = (searchParams.get('portfolio') || 'GENERAL').toUpperCase();
+    if (portfolio === 'TOURISM' || portfolio === 'TOURISM_UNITS') {
+      portfolio = 'TOURISM_UNITS';
+    } else if (portfolio === 'NICHE' || portfolio === 'NICHE_HORECA_AUTO_CONSTRUCT') {
+      portfolio = 'NICHE_HORECA_AUTO_CONSTRUCT';
+    } else {
+      portfolio = 'GENERAL';
+    }
 
     const records = await queryAll<any>(
       `
@@ -37,7 +44,32 @@ export async function GET(request: NextRequest) {
       [portfolio]
     );
 
-    const headers = [
+    const isTourism = portfolio === 'TOURISM_UNITS';
+
+    const headers = isTourism ? [
+      'Nr Crt',
+      'Tip unitate',
+      'Nume unitate',
+      'Tip categorie',
+      'Număr spații',
+      'Număr locuri',
+      'Alte detalii adresă',
+      'Tip localitate',
+      'Localitate componentă',
+      'Localitate',
+      'Județ',
+      'Email',
+      'Web',
+      'Tip Operator Economic',
+      'Operator Economic',
+      'Număr Înregistrare',
+      'Cod Unic Înregistrare (CUI)',
+      'Statut Comercial',
+      'Revenire Programată',
+      'Număr Discuții',
+      'Ultima Discuție',
+      'Notițe Operative',
+    ] : [
       'Nr',
       'Denumire Companie',
       'Statut Comercial',
@@ -66,14 +98,6 @@ export async function GET(request: NextRequest) {
     rows.push(headers.map(escapeCsv).join(','));
 
     for (const r of records) {
-      let phonesStr = '';
-      try {
-        const p = r.phones ? JSON.parse(r.phones) : [];
-        phonesStr = Array.isArray(p) ? p.join(', ') : String(r.phones);
-      } catch {
-        phonesStr = r.phones || '';
-      }
-
       let emailsStr = '';
       try {
         const e = r.emails ? JSON.parse(r.emails) : [];
@@ -82,47 +106,85 @@ export async function GET(request: NextRequest) {
         emailsStr = r.emails || '';
       }
 
-      let productsStr = '';
-      try {
-        const prod = r.confirmed_interested_products ? JSON.parse(r.confirmed_interested_products) : [];
-        productsStr = Array.isArray(prod) ? prod.join(', ') : '';
-      } catch {
-        productsStr = '';
-      }
-
       const statusDef = COMMERCIAL_STATUSES[r.commercial_status as any];
       const statusLabel = statusDef ? statusDef.label : r.commercial_status;
 
-      rows.push([
-        escapeCsv(r.source_row_index || ''),
-        escapeCsv(r.company_name || ''),
-        escapeCsv(statusLabel),
-        escapeCsv(r.cui || ''),
-        escapeCsv(r.reg_com || ''),
-        escapeCsv(r.domain || ''),
-        escapeCsv(r.county || ''),
-        escapeCsv(r.city || ''),
-        escapeCsv(r.address || ''),
-        escapeCsv(phonesStr),
-        escapeCsv(emailsStr),
-        escapeCsv(r.website || ''),
-        escapeCsv(r.decision_maker || r.contact_persons || ''),
-        escapeCsv(r.insurance_suggestions || ''),
-        escapeCsv(productsStr),
-        escapeCsv(r.next_callback_date || ''),
-        escapeCsv(r.next_action || ''),
-        escapeCsv(r.discussions_count || 0),
-        escapeCsv(r.last_discussion_date || ''),
-        escapeCsv(r.operational_notes || r.initial_notes || ''),
-        escapeCsv(r.is_incomplete ? 'DA (Date incomplete)' : 'NU'),
-        escapeCsv(r.source_file || ''),
-      ].join(','));
+      if (isTourism) {
+        rows.push([
+          escapeCsv(r.source_row_index || ''),
+          escapeCsv(r.unit_type || ''),
+          escapeCsv(r.unit_name || r.company_name || ''),
+          escapeCsv(r.unit_classification || ''),
+          escapeCsv(r.rooms_count || ''),
+          escapeCsv(r.beds_count || ''),
+          escapeCsv(r.address || ''),
+          escapeCsv(r.locality_type || ''),
+          escapeCsv(r.locality_subdivision || ''),
+          escapeCsv(r.city || ''),
+          escapeCsv(r.county || ''),
+          escapeCsv(emailsStr),
+          escapeCsv(r.website || ''),
+          escapeCsv(r.operator_type || ''),
+          escapeCsv(r.operator_name || ''),
+          escapeCsv(r.reg_com || ''),
+          escapeCsv(r.cui || ''),
+          escapeCsv(statusLabel),
+          escapeCsv(r.next_callback_date || ''),
+          escapeCsv(r.discussions_count || 0),
+          escapeCsv(r.last_discussion_date || ''),
+          escapeCsv(r.operational_notes || ''),
+        ].join(','));
+      } else {
+        let phonesStr = '';
+        try {
+          const p = r.phones ? JSON.parse(r.phones) : [];
+          phonesStr = Array.isArray(p) ? p.join(', ') : String(r.phones);
+        } catch {
+          phonesStr = r.phones || '';
+        }
+
+        let productsStr = '';
+        try {
+          const prod = r.confirmed_interested_products ? JSON.parse(r.confirmed_interested_products) : [];
+          productsStr = Array.isArray(prod) ? prod.join(', ') : '';
+        } catch {
+          productsStr = '';
+        }
+
+        rows.push([
+          escapeCsv(r.source_row_index || ''),
+          escapeCsv(r.company_name || ''),
+          escapeCsv(statusLabel),
+          escapeCsv(r.cui || ''),
+          escapeCsv(r.reg_com || ''),
+          escapeCsv(r.domain || ''),
+          escapeCsv(r.county || ''),
+          escapeCsv(r.city || ''),
+          escapeCsv(r.address || ''),
+          escapeCsv(phonesStr),
+          escapeCsv(emailsStr),
+          escapeCsv(r.website || ''),
+          escapeCsv(r.decision_maker || r.contact_persons || ''),
+          escapeCsv(r.insurance_suggestions || ''),
+          escapeCsv(productsStr),
+          escapeCsv(r.next_callback_date || ''),
+          escapeCsv(r.next_action || ''),
+          escapeCsv(r.discussions_count || 0),
+          escapeCsv(r.last_discussion_date || ''),
+          escapeCsv(r.operational_notes || r.initial_notes || ''),
+          escapeCsv(r.is_incomplete ? 'DA (Date incomplete)' : 'NU'),
+          escapeCsv(r.source_file || ''),
+        ].join(','));
+      }
     }
 
     const csvContent = '\uFEFF' + rows.join('\r\n');
-    const filename = portfolio === 'GENERAL' 
-      ? 'prospectare_generala_business_radar.csv'
-      : 'prospectare_horeca_constructii_business_radar.csv';
+    let filename = 'prospectare_generala_business_radar.csv';
+    if (isTourism) {
+      filename = 'unitati_turistice_clasificate_romania.csv';
+    } else if (portfolio === 'NICHE_HORECA_AUTO_CONSTRUCT') {
+      filename = 'prospectare_horeca_constructii_business_radar.csv';
+    }
 
     return new NextResponse(csvContent, {
       status: 200,

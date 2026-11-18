@@ -115,10 +115,23 @@ test('Prospecting CRM — All 17 commercial statuses are supported and start at 
     GROUP BY commercial_status;
   `).all();
 
-  // Initially all records must be NEW_UNVERIFIED
+  // Initially all records across all portfolios must be NEW_UNVERIFIED
   assert.strictEqual(statusSummary.length, 1);
   assert.strictEqual(statusSummary[0].commercial_status, 'NEW_UNVERIFIED');
-  assert.strictEqual(statusSummary[0].count, 329);
+  // 304 (General) + 25 (Niche) + 30,874 (Tourism Units) = 31,203 total records
+  assert.strictEqual(statusSummary[0].count, 31203);
+
+  // Breakdown by portfolio
+  const portfolioCounts = db.prepare(`
+    SELECT portfolio_type, count(*) as count
+    FROM prospect_records
+    GROUP BY portfolio_type;
+  `).all();
+
+  const countMap = Object.fromEntries(portfolioCounts.map(r => [r.portfolio_type, r.count]));
+  assert.strictEqual(countMap['GENERAL'], 304);
+  assert.strictEqual(countMap['NICHE_HORECA_AUTO_CONSTRUCT'], 25);
+  assert.strictEqual(countMap['TOURISM_UNITS'], 30874);
 
   db.close();
 });

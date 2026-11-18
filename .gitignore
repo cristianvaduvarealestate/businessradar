@@ -18,6 +18,9 @@ dist/
 data/*.db*
 data/*.CSV
 data/*.csv
+data/*.sql
+data/*.xlsm
+data/d1_tourism_batches/
 data/national_shards/
 data/national_shards_v2/
 data/test_shards/

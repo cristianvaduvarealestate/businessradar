@@ -1,4 +1,4 @@
-export type PortfolioType = 'GENERAL' | 'NICHE_HORECA_AUTO_CONSTRUCT';
+export type PortfolioType = 'GENERAL' | 'NICHE_HORECA_AUTO_CONSTRUCT' | 'TOURISM_UNITS';
 
 export type CommercialStatusKey =
   | 'NEW_UNVERIFIED'
@@ -174,6 +174,18 @@ export interface ProspectRecord {
   is_potential_duplicate: number;
   next_callback_date?: string | null;
   next_action?: string | null;
+  // Specialized fields for tourism units portfolio
+  unit_type?: string | null;
+  unit_name?: string | null;
+  unit_classification?: string | null;
+  rooms_count?: string | null;
+  beds_count?: string | null;
+  locality_type?: string | null;
+  locality_subdivision?: string | null;
+  operator_type?: string | null;
+  operator_name?: string | null;
+  authorization_number?: string | null;
+  authorization_date?: string | null;
   created_at: string;
   updated_at: string;
   discussions_count?: number;

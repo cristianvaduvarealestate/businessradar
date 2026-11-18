@@ -50,21 +50,68 @@ function formatSafeDate(d: string | null | undefined): string {
   }
 }
 
+const TOURISM_TOP_COUNTIES = [
+  'CONSTANŢA',
+  'BRAŞOV',
+  'MUNICIPIUL BUCUREŞTI',
+  'CLUJ',
+  'SUCEAVA',
+  'PRAHOVA',
+  'MARAMUREŞ',
+  'SIBIU',
+  'BIHOR',
+  'HARGHITA',
+  'HUNEDOARA',
+  'TULCEA',
+  'MUREŞ',
+  'TIMIŞ',
+  'ALBA',
+  'ARGEŞ',
+  'VÂLCEA',
+];
+
+const TOURISM_UNIT_TYPES = [
+  'CAMERE DE ÎNCHIRIAT',
+  'APARTAMENTE DE ÎNCHIRIAT',
+  'PENSIUNE TURISTICĂ',
+  'HOTEL',
+  'PENSIUNE AGROTURISTICĂ',
+  'VILĂ TURISTICĂ',
+  'HOSTEL',
+  'CĂSUȚE TIP CAMPING',
+  'CABANĂ TURISTICĂ',
+  'MOTEL',
+  'CAMPING',
+  'BUNGALOURI',
+];
+
 export default function ProspectingPortfolioPage({ params }: PageProps) {
   const routeParams = useParams();
   const rawPortfolio = (params?.portfolio || (routeParams?.portfolio as string) || '').toLowerCase();
 
   const isNiche = rawPortfolio === 'niche';
-  const portfolioType: PortfolioType = isNiche ? 'NICHE_HORECA_AUTO_CONSTRUCT' : 'GENERAL';
-  const title = isNiche
-    ? 'Hoteluri, pensiuni, rent-a-car și construcții'
-    : 'Prospectare Generală';
-  const subtitle = isNiche
-    ? 'Portofoliu nișat: 25 companii cu date complete de contact, flote auto și sugestii de asigurare'
-    : 'Companii din servicii, sănătate, construcții, logistică, auto, IT și distribuție';
-  const sourceBadge = isNiche
-    ? 'Sursa: Pasted markdown (2).md (25 companii)'
-    : 'Sursa: Pasted text.txt (304 firme)';
+  const isTourism = rawPortfolio === 'tourism' || rawPortfolio === 'unitati-turistice';
+
+  let portfolioType: PortfolioType = 'GENERAL';
+  if (isTourism) {
+    portfolioType = 'TOURISM_UNITS';
+  } else if (isNiche) {
+    portfolioType = 'NICHE_HORECA_AUTO_CONSTRUCT';
+  }
+
+  let title = 'Prospectare Generală';
+  let subtitle = 'Companii din servicii, sănătate, construcții, logistică, auto, IT și distribuție';
+  let sourceBadge = 'Sursa: Pasted text.txt (304 firme)';
+
+  if (isTourism) {
+    title = 'Unități Turistice Clasificate';
+    subtitle = 'Registrul Național Oficial: Hoteluri, pensiuni, apartamente și camere de închiriat din România';
+    sourceBadge = 'Sursa: Registrul Național Oficial (30.874 unități clasificate)';
+  } else if (isNiche) {
+    title = 'Hoteluri, pensiuni, rent-a-car și construcții';
+    subtitle = 'Portofoliu nișat: 25 companii cu date complete de contact, flote auto și sugestii de asigurare';
+    sourceBadge = 'Sursa: Pasted markdown (2).md (25 companii)';
+  }
 
   const [loading, setLoading] = useState(true);
   const [records, setRecords] = useState<ProspectRecord[]>([]);
@@ -74,6 +121,9 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<CommercialStatusKey | ''>('');
   const [callbackFilter, setCallbackFilter] = useState<'' | 'today' | 'overdue' | 'week'>('');
+  const [countyFilter, setCountyFilter] = useState('');
+  const [unitTypeFilter, setUnitTypeFilter] = useState('');
+  const [hasContactFilter, setHasContactFilter] = useState('');
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
   const [callbackCounts, setCallbackCounts] = useState<{ overdue: number; today: number; week: number }>({
     overdue: 0,
@@ -94,6 +144,9 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
       if (search.trim()) q.set('search', search.trim());
       if (statusFilter) q.set('status', statusFilter);
       if (callbackFilter) q.set('callback_filter', callbackFilter);
+      if (countyFilter) q.set('county', countyFilter);
+      if (unitTypeFilter) q.set('unit_type', unitTypeFilter);
+      if (hasContactFilter) q.set('has_contact', hasContactFilter);
 
       const res = await fetch(`/api/prospecting?${q.toString()}`);
       const json = await res.json();
@@ -113,7 +166,7 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
 
   useEffect(() => {
     fetchProspects();
-  }, [portfolioType, page, statusFilter, callbackFilter]);
+  }, [portfolioType, page, statusFilter, callbackFilter, countyFilter, unitTypeFilter, hasContactFilter]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -235,7 +288,7 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
       </header>
 
       {/* 2. FILTER AND SEARCH BAR */}
-      <div className="p-3.5 sm:p-5 border-b border-titanium-800 bg-titanium-900/30">
+      <div className="p-3.5 sm:p-5 border-b border-titanium-800 bg-titanium-900/30 space-y-3">
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           <form onSubmit={handleSearchSubmit} className="relative flex-1 w-full">
             <Search className="w-4 h-4 text-titanium-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -243,7 +296,11 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Caută după nume firmă, oraș, domeniu, telefon, email sau CUI..."
+              placeholder={
+                isTourism
+                  ? 'Caută după nume unitate, operator economic, localitate, județ, email, CUI...'
+                  : 'Caută după nume firmă, oraș, domeniu, telefon, email sau CUI...'
+              }
               className="w-full bg-titanium-900 border border-titanium-700 text-titanium-100 rounded-lg pl-9 pr-20 py-2.5 text-xs focus:ring-1 focus:ring-radar-green"
             />
             <button
@@ -263,15 +320,71 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
               }}
               className="w-full bg-titanium-900 border border-titanium-700 text-titanium-100 rounded-lg px-3 py-2.5 text-xs font-medium focus:ring-1 focus:ring-radar-green truncate"
             >
-              <option value="">Toate cele 17 statute comerciale ({total})</option>
+              <option value="">Toate cele 17 statute comerciale ({total.toLocaleString('ro-RO')})</option>
               {Object.values(COMMERCIAL_STATUSES).map((st) => (
                 <option key={st.key} value={st.key}>
-                  {st.label} ({statusCounts[st.key] || 0})
+                  {st.label} ({(statusCounts[st.key] || 0).toLocaleString('ro-RO')})
                 </option>
               ))}
             </select>
           </div>
         </div>
+
+        {/* Specialized Tourism Filters */}
+        {isTourism && (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-titanium-800/60">
+            <div>
+              <select
+                value={countyFilter}
+                onChange={(e) => {
+                  setCountyFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full bg-titanium-900 border border-titanium-700 text-titanium-200 rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-radar-green truncate"
+              >
+                <option value="">Toate județele (42 județe)</option>
+                {TOURISM_TOP_COUNTIES.map((c) => (
+                  <option key={c} value={c}>
+                    Județul {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <select
+                value={unitTypeFilter}
+                onChange={(e) => {
+                  setUnitTypeFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full bg-titanium-900 border border-titanium-700 text-titanium-200 rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-radar-green truncate"
+              >
+                <option value="">Toate tipurile de cazare (19 tipuri)</option>
+                {TOURISM_UNIT_TYPES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <select
+                value={hasContactFilter}
+                onChange={(e) => {
+                  setHasContactFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full bg-titanium-900 border border-titanium-700 text-titanium-200 rounded-lg px-3 py-2 text-xs focus:ring-1 focus:ring-radar-green truncate"
+              >
+                <option value="">Toate contactele (Email / Web / Adresă)</option>
+                <option value="true">Doar cu Contact Direct (Email sau Web)</option>
+                <option value="false">Fără Contact Direct (Doar Poștă/Adresă)</option>
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 3. CONTENT AREA */}
@@ -313,13 +426,31 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
                             onClick={() => openDossier(r.id)}
                             className="font-bold text-titanium-100 hover:text-radar-green transition text-sm cursor-pointer"
                           >
-                            {r.company_name}
+                            {isTourism ? (r.unit_name || r.company_name) : r.company_name}
                           </span>
+                          {isTourism && r.unit_type && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-titanium-800 text-titanium-300 border border-titanium-700">
+                              {r.unit_type}
+                            </span>
+                          )}
+                          {isTourism && r.unit_classification && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-950/60 text-radar-green border border-emerald-800/60">
+                              {r.unit_classification}
+                            </span>
+                          )}
                         </div>
-                        {r.domain && (
-                          <div className="text-xs text-titanium-400 mt-0.5 truncate">
-                            {r.domain}
-                          </div>
+                        {isTourism ? (
+                          r.operator_name && (
+                            <div className="text-xs text-titanium-300 mt-0.5 truncate">
+                              Operator: <span className="text-titanium-100 font-medium">{r.operator_name}</span>
+                            </div>
+                          )
+                        ) : (
+                          r.domain && (
+                            <div className="text-xs text-titanium-400 mt-0.5 truncate">
+                              {r.domain}
+                            </div>
+                          )
                         )}
                       </div>
 
@@ -337,8 +468,13 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
                       {(r.city || r.county) && (
                         <div className="flex items-center gap-1 text-titanium-300">
                           <MapPin className="w-3 h-3 text-titanium-500 shrink-0" />
-                          <span>{[r.city, r.county].filter(Boolean).join(', ')}</span>
+                          <span>{[r.locality_subdivision, r.city, r.county].filter(Boolean).join(', ')}</span>
                         </div>
+                      )}
+                      {isTourism && (r.rooms_count || r.beds_count) && (
+                        <span className="text-[11px] text-titanium-300 bg-titanium-950 px-1.5 py-0.5 rounded border border-titanium-800">
+                          {r.rooms_count ? `${r.rooms_count} sp.` : ''} {r.beds_count ? `• ${r.beds_count} loc.` : ''}
+                        </span>
                       )}
                       {r.cui && (
                         <span className="font-mono text-[11px] text-titanium-400">
@@ -389,7 +525,21 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
                         </div>
                       ) : null}
 
-                      {(!r.phones || r.phones.length === 0) && (!r.emails || r.emails.length === 0) && (
+                      {r.website && (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <a
+                            href={r.website.startsWith('http') ? r.website : `https://${r.website}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs text-radar-green hover:underline bg-titanium-950 px-2.5 py-1 rounded-lg border border-titanium-800 truncate max-w-full"
+                          >
+                            <Globe className="w-3 h-3 shrink-0" />
+                            <span className="truncate">{r.website}</span>
+                          </a>
+                        </div>
+                      )}
+
+                      {(!r.phones || r.phones.length === 0) && (!r.emails || r.emails.length === 0) && !r.website && (
                         <span className="text-titanium-500 italic text-xs">Fără date directe de contact</span>
                       )}
                     </div>
@@ -433,8 +583,10 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
                 <thead>
                   <tr className="border-b border-titanium-800 bg-titanium-900/90 text-[11px] font-semibold text-titanium-400 uppercase tracking-wider">
                     <th className="py-3 px-4 w-12 text-center">#</th>
-                    <th className="py-3 px-4">Companie & Profil</th>
+                    <th className="py-3 px-4">{isTourism ? 'Unitate & Clasificare' : 'Companie & Profil'}</th>
+                    {isTourism && <th className="py-3 px-4">Operator Economic & CUI</th>}
                     <th className="py-3 px-4">Localizare</th>
+                    {isTourism && <th className="py-3 px-4">Capacitate</th>}
                     <th className="py-3 px-4">Contacte Directe</th>
                     <th className="py-3 px-4">Statut Comercial</th>
                     <th className="py-3 px-4">Revenire / Discuții</th>
@@ -459,10 +611,15 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
                           {r.source_row_index || idx + 1}
                         </td>
 
-                        {/* Company Name & Badges */}
+                        {/* Company / Unit Name & Badges */}
                         <td className="py-3.5 px-4 max-w-xs">
                           <div className="font-semibold text-titanium-100 group-hover:text-radar-green transition flex items-center gap-1.5 flex-wrap">
-                            <span>{r.company_name}</span>
+                            <span>{isTourism ? (r.unit_name || r.company_name) : r.company_name}</span>
+                            {isTourism && r.unit_classification && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-950/60 text-radar-green border border-emerald-800/60">
+                                {r.unit_classification}
+                              </span>
+                            )}
                             {r.is_incomplete === 1 && (
                               <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-300 border border-amber-800/60">
                                 Date incomplete
@@ -475,26 +632,51 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
                             )}
                           </div>
                           <div className="text-[11px] text-titanium-400 mt-0.5 truncate">
-                            {r.domain || 'Domeniu nespecificat'}
+                            {isTourism ? (r.unit_type || 'Unitate Turistică') : (r.domain || 'Domeniu nespecificat')}
                           </div>
-                          {r.cui && (
+                          {!isTourism && r.cui && (
                             <div className="text-[10px] font-mono text-titanium-400 mt-0.5">
                               CUI: {r.cui} {r.reg_com && `• ${r.reg_com}`}
                             </div>
                           )}
                         </td>
 
+                        {/* Operator Economic Column (if Tourism) */}
+                        {isTourism && (
+                          <td className="py-3.5 px-4 max-w-xs">
+                            <div className="font-medium text-titanium-200 truncate">
+                              {r.operator_name || '—'}
+                            </div>
+                            <div className="text-[10px] font-mono text-titanium-400 mt-0.5">
+                              {r.cui ? `CUI: ${r.cui}` : 'Fără CUI'} {r.reg_com ? `• ${r.reg_com}` : ''}
+                            </div>
+                          </td>
+                        )}
+
                         {/* Location */}
                         <td className="py-3.5 px-4 whitespace-nowrap text-[11px] text-titanium-300">
                           {r.city || r.county ? (
                             <div className="flex items-center gap-1">
                               <MapPin className="w-3 h-3 text-titanium-500 shrink-0" />
-                              <span>{[r.city, r.county].filter(Boolean).join(', ')}</span>
+                              <span>{[r.locality_subdivision, r.city, r.county].filter(Boolean).join(', ')}</span>
                             </div>
                           ) : (
                             <span className="text-titanium-500 italic">—</span>
                           )}
                         </td>
+
+                        {/* Capacitate (if Tourism) */}
+                        {isTourism && (
+                          <td className="py-3.5 px-4 whitespace-nowrap text-[11px] text-titanium-300">
+                            {r.rooms_count || r.beds_count ? (
+                              <span>
+                                {r.rooms_count ? `${r.rooms_count} sp.` : ''} {r.beds_count ? `• ${r.beds_count} loc.` : ''}
+                              </span>
+                            ) : (
+                              <span className="text-titanium-500 italic">—</span>
+                            )}
+                          </td>
+                        )}
 
                         {/* Contacts */}
                         <td className="py-3.5 px-4 max-w-xs" onClick={(e) => e.stopPropagation()}>
@@ -533,7 +715,22 @@ export default function ProspectingPortfolioPage({ params }: PageProps) {
                               </div>
                             ) : null}
 
-                            {(!r.phones || r.phones.length === 0) && (!r.emails || r.emails.length === 0) && (
+                            {r.website && (
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <a
+                                  href={r.website.startsWith('http') ? r.website : `https://${r.website}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-[11px] text-radar-green hover:underline bg-titanium-950 px-1.5 py-0.5 rounded border border-titanium-800 truncate max-w-[170px]"
+                                  title={r.website}
+                                >
+                                  <Globe className="w-2.5 h-2.5 shrink-0" />
+                                  <span className="truncate">{r.website}</span>
+                                </a>
+                              </div>
+                            )}
+
+                            {(!r.phones || r.phones.length === 0) && (!r.emails || r.emails.length === 0) && !r.website && (
                               <span className="text-titanium-500 italic text-[11px]">Fără contacte directe</span>
                             )}
                           </div>

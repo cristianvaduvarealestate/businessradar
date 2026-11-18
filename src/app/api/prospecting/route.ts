@@ -16,9 +16,20 @@ export async function GET(request: NextRequest) {
 
   try {
     const { searchParams } = new URL(request.url);
-    const portfolio = searchParams.get('portfolio') as PortfolioType || 'GENERAL';
+    let portfolio = (searchParams.get('portfolio') || 'GENERAL').toUpperCase();
+    if (portfolio === 'TOURISM' || portfolio === 'TOURISM_UNITS') {
+      portfolio = 'TOURISM_UNITS';
+    } else if (portfolio === 'NICHE' || portfolio === 'NICHE_HORECA_AUTO_CONSTRUCT') {
+      portfolio = 'NICHE_HORECA_AUTO_CONSTRUCT';
+    } else {
+      portfolio = 'GENERAL';
+    }
+
     const search = searchParams.get('search')?.trim() || '';
     const status = searchParams.get('status') as CommercialStatusKey | null;
+    const county = searchParams.get('county')?.trim() || '';
+    const unitType = searchParams.get('unit_type')?.trim() || '';
+    const hasContact = searchParams.get('has_contact');
     const callbackFilter = searchParams.get('callback_filter'); // 'today' | 'overdue' | 'week'
     const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10));
     const limit = Math.min(100, Math.max(10, parseInt(searchParams.get('limit') || '50', 10)));
@@ -30,14 +41,32 @@ export async function GET(request: NextRequest) {
     if (search) {
       whereClauses.push(`(
         company_name LIKE ? OR 
+        operator_name LIKE ? OR 
         city LIKE ? OR 
+        county LIKE ? OR 
         domain LIKE ? OR 
         phones LIKE ? OR 
         emails LIKE ? OR 
         cui LIKE ?
       )`);
       const searchPattern = `%${search}%`;
-      params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
+      params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
+    }
+
+    if (county) {
+      whereClauses.push('county = ?');
+      params.push(county);
+    }
+
+    if (unitType) {
+      whereClauses.push('unit_type = ?');
+      params.push(unitType);
+    }
+
+    if (hasContact === 'true') {
+      whereClauses.push("(emails != '[]' AND emails IS NOT NULL OR website IS NOT NULL)");
+    } else if (hasContact === 'false') {
+      whereClauses.push("((emails = '[]' OR emails IS NULL) AND website IS NULL)");
     }
 
     if (status && COMMERCIAL_STATUSES[status]) {
